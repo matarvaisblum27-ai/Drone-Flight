@@ -277,7 +277,7 @@ export default function AdminDashboard() {
   }, [router])
 
   const fetchDB = useCallback(async () => {
-    const res = await fetch('/api/flights')
+    const res = await fetch('/api/flights', { cache: 'no-store' })
     setDb(await res.json())
   }, [])
 
@@ -362,23 +362,37 @@ export default function AdminDashboard() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, license }),
     })
-    if (res.status === 409) { alert('טייס עם שם זה כבר קיים במערכת'); return }
+    if (!res.ok) {
+      if (res.status === 409) alert('טייס עם שם זה כבר קיים במערכת')
+      else alert('שגיאה בהוספת טייס')
+      return
+    }
+    const newPilot: Pilot = await res.json()
+    setDb(prev => prev ? { ...prev, pilots: [...prev.pilots, newPilot] } : prev)
     setEditPilot(null)
     fetchDB()
   }
 
   const handleEditPilot = async (name: string, license: string) => {
     if (!editPilot || editPilot === 'add') return
-    await fetch('/api/pilots', {
+    const pilot = editPilot as Pilot
+    const res = await fetch('/api/pilots', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: (editPilot as Pilot).id, name, license }),
+      body: JSON.stringify({ id: pilot.id, name, license }),
     })
+    if (!res.ok) { alert('שגיאה בעריכת טייס'); return }
+    setDb(prev => prev ? {
+      ...prev,
+      pilots: prev.pilots.map(p => p.id === pilot.id ? { ...p, name, license } : p),
+    } : prev)
     setEditPilot(null)
     fetchDB()
   }
 
   const handleDeletePilot = async (id: string) => {
-    await fetch(`/api/pilots?id=${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/pilots?id=${id}`, { method: 'DELETE' })
+    if (!res.ok) { alert('שגיאה במחיקת טייס'); return }
+    setDb(prev => prev ? { ...prev, pilots: prev.pilots.filter(p => p.id !== id) } : prev)
     setConfirmPilotId(null)
     fetchDB()
   }
@@ -812,7 +826,7 @@ export default function AdminDashboard() {
                                 </svg>
                               </button>
                               <button
-                                onClick={() => !isAdmin && setConfirmPilotId(p.id)}
+                                onClick={() => { if (!isAdmin) setConfirmPilotId(p.id) }}
                                 disabled={isAdmin}
                                 title={isAdmin ? 'לא ניתן למחוק מפקד' : 'מחיקה'}
                                 className={`p-1.5 rounded-lg transition-colors
