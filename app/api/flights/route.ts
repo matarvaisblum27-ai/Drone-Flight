@@ -1,84 +1,119 @@
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-import { FlightDB, Flight } from '@/lib/types'
+import { supabase } from '@/lib/supabase'
+import { Flight, FlightDB } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
-const DB_PATH = path.join(process.cwd(), 'data', 'flights.json')
-
-function readDB(): FlightDB {
-  const raw = fs.readFileSync(DB_PATH, 'utf-8')
-  return JSON.parse(raw)
-}
-
-function writeDB(db: FlightDB) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8')
+// Map a Supabase snake_case row → TypeScript camelCase Flight
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToFlight(row: any): Flight {
+  return {
+    id:           row.id,
+    pilotId:      row.pilot_id,
+    pilotName:    row.pilot_name,
+    date:         row.date,
+    missionName:  row.mission_name,
+    tailNumber:   row.tail_number,
+    battery:      row.battery,
+    startTime:    row.start_time,
+    endTime:      row.end_time,
+    batteryStart: row.battery_start,
+    batteryEnd:   row.battery_end,
+    duration:     row.duration,
+  }
 }
 
 export async function GET() {
-  const db = readDB()
+  const [pilotsRes, flightsRes, batteriesRes] = await Promise.all([
+    supabase.from('pilots').select('*').order('name'),
+    supabase.from('flights').select('*').order('date').order('start_time'),
+    supabase.from('batteries').select('*'),
+  ])
+
+  if (pilotsRes.error)    return NextResponse.json({ error: pilotsRes.error.message },    { status: 500 })
+  if (flightsRes.error)   return NextResponse.json({ error: flightsRes.error.message },   { status: 500 })
+  if (batteriesRes.error) return NextResponse.json({ error: batteriesRes.error.message }, { status: 500 })
+
+  const batteries: Record<string, number> = {}
+  for (const row of batteriesRes.data) batteries[row.label] = row.percentage
+
+  const db: FlightDB = {
+    pilots:  pilotsRes.data,
+    flights: flightsRes.data.map(rowToFlight),
+    batteries,
+  }
   return NextResponse.json(db)
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const db = readDB()
 
-  const newFlight: Flight = {
-    id: `f${Date.now()}`,
-    pilotId: body.pilotId,
-    pilotName: body.pilotName,
-    date: body.date,
-    missionName: body.missionName,
-    tailNumber: body.tailNumber,
-    battery: body.battery,
-    startTime: body.startTime,
-    endTime: body.endTime,
-    batteryStart: Number(body.batteryStart),
-    batteryEnd: Number(body.batteryEnd),
-    duration: Number(body.duration),
-  }
+  const { data, error } = await supabase
+    .from('flights')
+    .insert({
+      id:            `f${Date.now()}`,
+      pilot_id:      body.pilotId,
+      pilot_name:    body.pilotName,
+      date:          body.date,
+      mission_name:  body.missionName,
+      tail_number:   body.tailNumber,
+      battery:       body.battery,
+      start_time:    body.startTime,
+      end_time:      body.endTime,
+      battery_start: Number(body.batteryStart),
+      battery_end:   Number(body.batteryEnd),
+      duration:      Number(body.duration),
+    })
+    .select()
+    .single()
 
-  db.flights.push(newFlight)
-  // Update battery last known level
-  db.batteries[body.battery] = Number(body.batteryEnd)
-  writeDB(db)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json(newFlight, { status: 201 })
+  await supabase
+    .from('batteries')
+    .upsert({ label: body.battery, percentage: Number(body.batteryEnd) })
+
+  return NextResponse.json(rowToFlight(data), { status: 201 })
 }
 
 export async function PUT(req: NextRequest) {
   const body = await req.json()
-  const db = readDB()
-  const idx = db.flights.findIndex((f) => f.id === body.id)
-  if (idx === -1) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  const updated: Flight = {
-    ...db.flights[idx],
-    pilotId: body.pilotId ?? db.flights[idx].pilotId,
-    pilotName: body.pilotName ?? db.flights[idx].pilotName,
-    date: body.date ?? db.flights[idx].date,
-    missionName: body.missionName ?? db.flights[idx].missionName,
-    tailNumber: body.tailNumber ?? db.flights[idx].tailNumber,
-    battery: body.battery ?? db.flights[idx].battery,
-    startTime: body.startTime ?? db.flights[idx].startTime,
-    endTime: body.endTime ?? db.flights[idx].endTime,
-    batteryStart: body.batteryStart != null ? Number(body.batteryStart) : db.flights[idx].batteryStart,
-    batteryEnd: body.batteryEnd != null ? Number(body.batteryEnd) : db.flights[idx].batteryEnd,
-    duration: body.duration != null ? Number(body.duration) : db.flights[idx].duration,
+  const { data: existing, error: fetchErr } = await supabase
+    .from('flights').select('*').eq('id', body.id).single()
+  if (fetchErr || !existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
+
+  const updates = {
+    pilot_id:      body.pilotId     ?? existing.pilot_id,
+    pilot_name:    body.pilotName   ?? existing.pilot_name,
+    date:          body.date        ?? existing.date,
+    mission_name:  body.missionName ?? existing.mission_name,
+    tail_number:   body.tailNumber  ?? existing.tail_number,
+    battery:       body.battery     ?? existing.battery,
+    start_time:    body.startTime   ?? existing.start_time,
+    end_time:      body.endTime     ?? existing.end_time,
+    battery_start: body.batteryStart != null ? Number(body.batteryStart) : existing.battery_start,
+    battery_end:   body.batteryEnd   != null ? Number(body.batteryEnd)   : existing.battery_end,
+    duration:      body.duration     != null ? Number(body.duration)     : existing.duration,
   }
-  db.flights[idx] = updated
-  db.batteries[updated.battery] = updated.batteryEnd
-  writeDB(db)
-  return NextResponse.json(updated)
+
+  const { data, error } = await supabase
+    .from('flights').update(updates).eq('id', body.id).select().single()
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  await supabase
+    .from('batteries')
+    .upsert({ label: updates.battery, percentage: updates.battery_end })
+
+  return NextResponse.json(rowToFlight(data))
 }
 
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
-  const db = readDB()
-  db.flights = db.flights.filter((f) => f.id !== id)
-  writeDB(db)
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+  const { error } = await supabase.from('flights').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }
