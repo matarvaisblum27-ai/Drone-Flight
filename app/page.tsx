@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [pilots, setPilots] = useState<Pilot[]>([])
   const [loading, setLoading] = useState(true)
+  const [apiError, setApiError] = useState(false)
   const router = useRouter()
 
   const isAdmin = name.trim() === ADMIN_NAME
@@ -19,14 +20,23 @@ export default function LoginPage() {
   useEffect(() => {
     fetch('/api/pilots')
       .then(r => r.json())
-      .then((data: Pilot[]) => { setPilots(data); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setPilots(data)
+        } else {
+          // API returned an error object (e.g. missing env vars, DB not set up)
+          console.error('Failed to load pilots:', data)
+          setApiError(true)
+        }
+        setLoading(false)
+      })
+      .catch(() => { setApiError(true); setLoading(false) })
   }, [])
 
   const handleLogin = () => {
     const trimmed = name.trim()
     if (!trimmed) { setError('נא להזין שם'); return }
-    if (!pilots.some(p => p.name === trimmed)) {
+    if (apiError || !Array.isArray(pilots) || !pilots.some(p => p.name === trimmed)) {
       setError('שם לא מזוהה במערכת. פנה למפקד היחידה.')
       return
     }
@@ -68,6 +78,12 @@ export default function LoginPage() {
         <div className="bg-slate-800/80 backdrop-blur border border-slate-700/60 rounded-2xl p-8 shadow-2xl">
           <h2 className="text-xl font-semibold text-slate-100 mb-1">כניסה למערכת</h2>
           <p className="text-slate-400 text-sm mb-6">הזן את שמך המלא לאימות זהות</p>
+
+          {apiError && (
+            <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-xl px-4 py-3 text-sm text-red-400">
+              שגיאת התחברות לשרת — ודא שמשתני הסביבה של Supabase מוגדרים ושטבלאות הנתונים נוצרו
+            </div>
+          )}
 
           <div className="space-y-5">
             <div>
