@@ -1,0 +1,282 @@
+{
+  "pilots": [
+    {
+      "id": "p1",
+      "name": "ישראל חסדאי",
+      "license": "102347"
+    },
+    {
+      "id": "p3",
+      "name": "עידו לוי",
+      "license": "318904"
+    },
+    {
+      "id": "p6",
+      "name": "מטר וייסבלום",
+      "license": "TEST01"
+    },
+    {
+      "id": "p0",
+      "name": "אורן וייסבלום",
+      "license": "102011"
+    },
+    {
+      "id": "pe1773884140758_9518",
+      "name": "באשיר פיראס",
+      "license": "100275"
+    },
+    {
+      "id": "pe1773884140758_6999",
+      "name": "אביב תורג'מן",
+      "license": "107630"
+    }
+  ],
+  "flights": [
+    {
+      "id": "imp_1773884140758_64090",
+      "pilotId": "pe1773884140758_9518",
+      "pilotName": "באשיר פיראס",
+      "date": "2026-01-06",
+      "missionName": "ביקור ממ''ז מנחת קלנדיה",
+      "tailNumber": "4X-YXB",
+      "battery": "C",
+      "startTime": "15:11",
+      "endTime": "15:28",
+      "batteryStart": 100,
+      "batteryEnd": 28,
+      "duration": 17
+    },
+    {
+      "id": "imp_1773884140758_25103",
+      "pilotId": "pe1773884140758_9518",
+      "pilotName": "באשיר פיראס",
+      "date": "2026-01-06",
+      "missionName": "ביקור ממ''ז מנחת קלנדיה",
+      "tailNumber": "4X-YXB",
+      "battery": "D",
+      "startTime": "15:50",
+      "endTime": "16:03",
+      "batteryStart": 100,
+      "batteryEnd": 30,
+      "duration": 13
+    },
+    {
+      "id": "imp_1773884140758_39935",
+      "pilotId": "pe1773884140758_9518",
+      "pilotName": "באשיר פיראס",
+      "date": "2026-01-06",
+      "missionName": "ביקור ממ''ז מנחת קלנדיה",
+      "tailNumber": "4X-YXB",
+      "battery": "F",
+      "startTime": "16:11",
+      "endTime": "16:33",
+      "batteryStart": 100,
+      "batteryEnd": 27,
+      "duration": 22
+    },
+    {
+      "id": "imp_1773884140758_50849",
+      "pilotId": "pe1773884140758_9518",
+      "pilotName": "באשיר פיראס",
+      "date": "2026-01-06",
+      "missionName": "ביקור ממ''ז מנחת קלנדיה",
+      "tailNumber": "4X-YXB",
+      "battery": "C",
+      "startTime": "16:33",
+      "endTime": "16:55",
+      "batteryStart": 100,
+      "batteryEnd": 27,
+      "duration": 22
+    },
+    {
+      "id": "imp_1773884140758_39136",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-01-27",
+      "missionName": "חיפוי כוחות הריסות כפר עקב",
+      "tailNumber": "4X-YXB",
+      "battery": "D",
+      "startTime": "10:40",
+      "endTime": "11:05",
+      "batteryStart": 99,
+      "batteryEnd": 28,
+      "duration": 25
+    },
+    {
+      "id": "imp_1773884140758_35022",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-01-27",
+      "missionName": "חיפוי כוחות הריסות כפר עקב",
+      "tailNumber": "4X-YXB",
+      "battery": "C",
+      "startTime": "11:10",
+      "endTime": "11:35",
+      "batteryStart": 99,
+      "batteryEnd": 23,
+      "duration": 25
+    },
+    {
+      "id": "imp_1773884140758_40846",
+      "pilotId": "p0",
+      "pilotName": "אורן וייסבלום",
+      "date": "2026-01-27",
+      "missionName": "חיפוי כוחות הריסות כפר עקב",
+      "tailNumber": "4X-YXB",
+      "battery": "A",
+      "startTime": "11:36",
+      "endTime": "12:02",
+      "batteryStart": 98,
+      "batteryEnd": 15,
+      "duration": 26
+    },
+    {
+      "id": "imp_1773884140758_69054",
+      "pilotId": "p0",
+      "pilotName": "אורן וייסבלום",
+      "date": "2026-01-27",
+      "missionName": "חיפוי כוחות הריסות כפר עקב",
+      "tailNumber": "4X-YXB",
+      "battery": "E",
+      "startTime": "12:04",
+      "endTime": "12:28",
+      "batteryStart": 92,
+      "batteryEnd": 18,
+      "duration": 24
+    },
+    {
+      "id": "imp_1773884140759_89199",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-02-05",
+      "missionName": "אימון הטסה",
+      "tailNumber": "4X-YXB",
+      "battery": "C",
+      "startTime": "10:35",
+      "endTime": "10:44",
+      "batteryStart": 97,
+      "batteryEnd": 70,
+      "duration": 9
+    },
+    {
+      "id": "imp_1773884140759_34179",
+      "pilotId": "p1",
+      "pilotName": "ישראל חסדאי",
+      "date": "2026-02-09",
+      "missionName": "מפ שועפט",
+      "tailNumber": "4X-YXB",
+      "battery": "F",
+      "startTime": "14:14",
+      "endTime": "14:35",
+      "batteryStart": 96,
+      "batteryEnd": 28,
+      "duration": 21
+    },
+    {
+      "id": "imp_1773884140759_91988",
+      "pilotId": "p1",
+      "pilotName": "ישראל חסדאי",
+      "date": "2026-02-09",
+      "missionName": "מפ שועפט",
+      "tailNumber": "4X-YXB",
+      "battery": "E",
+      "startTime": "14:35",
+      "endTime": "14:55",
+      "batteryStart": 100,
+      "batteryEnd": 30,
+      "duration": 20
+    },
+    {
+      "id": "imp_1773884140759_77523",
+      "pilotId": "p1",
+      "pilotName": "ישראל חסדאי",
+      "date": "2026-02-09",
+      "missionName": "מפ שועפט",
+      "tailNumber": "4X-YXB",
+      "battery": "A",
+      "startTime": "14:55",
+      "endTime": "15:16",
+      "batteryStart": 100,
+      "batteryEnd": 34,
+      "duration": 21
+    },
+    {
+      "id": "imp_1773884140759_10094",
+      "pilotId": "p1",
+      "pilotName": "ישראל חסדאי",
+      "date": "2026-02-09",
+      "missionName": "מפ שועפט",
+      "tailNumber": "4X-YXB",
+      "battery": "A",
+      "startTime": "15:16",
+      "endTime": "15:40",
+      "batteryStart": 100,
+      "batteryEnd": 41,
+      "duration": 24
+    },
+    {
+      "id": "imp_1773884140759_34243",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-02-08",
+      "missionName": "הדיפת שבח אל מונטאר",
+      "tailNumber": "4X-YXB",
+      "battery": "A",
+      "startTime": "07:10",
+      "endTime": "07:35",
+      "batteryStart": 100,
+      "batteryEnd": 30,
+      "duration": 25
+    },
+    {
+      "id": "imp_1773884140759_25430",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-02-08",
+      "missionName": "הדיפת שבח אל מונטאר",
+      "tailNumber": "4X-YXB",
+      "battery": "C",
+      "startTime": "07:37",
+      "endTime": "08:01",
+      "batteryStart": 100,
+      "batteryEnd": 31,
+      "duration": 24
+    },
+    {
+      "id": "imp_1773884140759_17001",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-02-08",
+      "missionName": "הדיפת שבח אל מונטאר",
+      "tailNumber": "4X-YXB",
+      "battery": "B",
+      "startTime": "08:02",
+      "endTime": "08:27",
+      "batteryStart": 100,
+      "batteryEnd": 29,
+      "duration": 25
+    },
+    {
+      "id": "imp_1773884140759_88158",
+      "pilotId": "pe1773884140758_6999",
+      "pilotName": "אביב תורג'מן",
+      "date": "2026-02-08",
+      "missionName": "הדיפת שבח אל מונטאר",
+      "tailNumber": "4X-YXB",
+      "battery": "A",
+      "startTime": "08:28",
+      "endTime": "08:50",
+      "batteryStart": 100,
+      "batteryEnd": 33,
+      "duration": 22
+    }
+  ],
+  "batteries": {
+    "A": 33,
+    "B": 29,
+    "C": 31,
+    "D": 28,
+    "E": 30,
+    "F": 28
+  }
+}
