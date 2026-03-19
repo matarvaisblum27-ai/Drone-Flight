@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { FlightDB, Flight } from '@/lib/types'
 
+export const dynamic = 'force-dynamic'
+
 const DB_PATH = path.join(process.cwd(), 'data', 'flights.json')
 
 function readDB(): FlightDB {
