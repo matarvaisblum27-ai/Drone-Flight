@@ -4,13 +4,17 @@ import { useRouter } from 'next/navigation'
 import { Pilot } from '@/lib/types'
 
 const ADMIN_NAME = 'אורן וייסבלום'
+const ADMIN_PASSWORD = 'oren3004'
 
 export default function LoginPage() {
   const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [pilots, setPilots] = useState<Pilot[]>([])
   const [loading, setLoading] = useState(true)
   const router = useRouter()
+
+  const isAdmin = name.trim() === ADMIN_NAME
 
   useEffect(() => {
     fetch('/api/pilots')
@@ -24,6 +28,10 @@ export default function LoginPage() {
     if (!trimmed) { setError('נא להזין שם'); return }
     if (!pilots.some(p => p.name === trimmed)) {
       setError('שם לא מזוהה במערכת. פנה למפקד היחידה.')
+      return
+    }
+    if (trimmed === ADMIN_NAME && password !== ADMIN_PASSWORD) {
+      setError('סיסמה שגויה')
       return
     }
     sessionStorage.setItem('currentUser', trimmed)
@@ -75,6 +83,26 @@ export default function LoginPage() {
                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-right
                   disabled:opacity-50 disabled:cursor-not-allowed"
               />
+            </div>
+
+            {isAdmin && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">סיסמה</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); setError('') }}
+                  onKeyDown={e => e.key === 'Enter' && !loading && handleLogin()}
+                  placeholder="הזן סיסמה"
+                  disabled={loading}
+                  className="w-full bg-slate-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-right
+                    disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+            )}
+
+            <div>
               {error && (
                 <p className="mt-2 text-sm text-red-400 flex items-center gap-1.5">
                   <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
