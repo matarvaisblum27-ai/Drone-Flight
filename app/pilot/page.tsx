@@ -63,6 +63,7 @@ export default function PilotDashboard() {
   const [form, setForm] = useState({
     date: '', missionName: '', tailNumber: '4x-pzk',
     battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
+    observer: '', gasDropped: false, gasDropTime: '',
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -122,10 +123,11 @@ export default function PilotDashboard() {
       body: JSON.stringify({
         pilotId: pilot.id, pilotName: pilot.name, date, missionName, tailNumber,
         battery, startTime, endTime, batteryStart: bs, batteryEnd: be, duration: dur,
+        observer: form.observer, gasDropped: form.gasDropped, gasDropTime: form.gasDropTime,
       }),
     })
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setForm({ date: '', missionName: '', tailNumber: '4X-YAA', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '' })
+    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
     fetchDB()
     setTimeout(() => setActiveTab('history'), 1200)
   }
@@ -283,7 +285,7 @@ export default function PilotDashboard() {
                       <div>
                         <p className="text-sm font-medium text-white">{f.missionName}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}{f.observer ? ` · ${f.observer}` : ''}{f.gasDropped ? ` · הטלת גז${f.gasDropTime ? ` ${f.gasDropTime}` : ''}` : ''}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
@@ -359,6 +361,31 @@ export default function PilotDashboard() {
                   onChange={e => setForm(f => ({ ...f, batteryEnd: e.target.value }))}
                   className={inputCls} />
               </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                <input type="text" value={form.observer}
+                  onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
+                  placeholder="שם התצפיתן..." className={inputCls} />
+              </div>
+              {form.tailNumber === '4x-ujs' && (
+                <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" checked={form.gasDropped}
+                      onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, gasDropTime: e.target.checked ? f.gasDropTime : '' }))}
+                      className="w-4 h-4 accent-amber-500" />
+                    <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
+                  </label>
+                  {form.gasDropped && (
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-amber-400/80 mb-1.5">שעת הטלה</label>
+                      <input type="time" value={form.gasDropTime}
+                        onChange={e => setForm(f => ({ ...f, gasDropTime: e.target.value }))}
+                        className={inputCls} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Duration preview */}
@@ -428,6 +455,8 @@ export default function PilotDashboard() {
                         <span>✈️ {droneLabel(f.tailNumber)}</span>
                         <span>🔋 סוללה {f.battery}: {f.batteryStart}% ← {f.batteryEnd}%</span>
                         <span>🕐 {f.startTime}–{f.endTime}</span>
+                        {f.observer && <span>👁 {f.observer}</span>}
+                        {f.gasDropped && <span className="text-amber-400">הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</span>}
                       </div>
                     </div>
                     <div className="flex items-start gap-3 flex-shrink-0">

@@ -69,6 +69,7 @@ function ConfirmDialog({ message, onConfirm, onCancel }: {
 type EditForm = {
   pilotId: string; date: string; missionName: string; tailNumber: string
   battery: string; startTime: string; endTime: string; batteryStart: string; batteryEnd: string
+  observer: string; gasDropped: boolean; gasDropTime: string
 }
 
 function EditModal({ flight, db, onSave, onCancel }: {
@@ -87,6 +88,9 @@ function EditModal({ flight, db, onSave, onCancel }: {
     endTime: flight.endTime,
     batteryStart: String(flight.batteryStart),
     batteryEnd: String(flight.batteryEnd),
+    observer: flight.observer ?? '',
+    gasDropped: flight.gasDropped ?? false,
+    gasDropTime: flight.gasDropTime ?? '',
   })
   const [error, setError] = useState('')
 
@@ -167,6 +171,31 @@ function EditModal({ flight, db, onSave, onCancel }: {
             <input type="number" min="0" max="100" value={form.batteryEnd}
               onChange={e => setForm(f => ({ ...f, batteryEnd: e.target.value }))} className={inputCls} />
           </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>תצפיתן (אופציונלי)</label>
+            <input type="text" value={form.observer}
+              onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
+              placeholder="שם התצפיתן..." className={inputCls} />
+          </div>
+          {form.tailNumber === '4x-ujs' && (
+            <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
+              <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={form.gasDropped}
+                  onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, gasDropTime: e.target.checked ? f.gasDropTime : '' }))}
+                  className="w-4 h-4 accent-amber-500" />
+                <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
+              </label>
+              {form.gasDropped && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-amber-400/80 mb-1.5">שעת הטלה</label>
+                  <input type="time" value={form.gasDropTime}
+                    onChange={e => setForm(f => ({ ...f, gasDropTime: e.target.value }))}
+                    className={inputCls} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {durationPreview !== null && durationPreview > 0 && (
@@ -262,6 +291,7 @@ export default function AdminDashboard() {
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
+    observer: '', gasDropped: false, gasDropTime: '',
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
@@ -327,10 +357,14 @@ export default function AdminDashboard() {
     const pilot = db.pilots.find(p => p.id === pilotId)!
     await fetch('/api/flights', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pilotId, pilotName: pilot.name, date, missionName, tailNumber, battery, startTime, endTime, batteryStart: bs, batteryEnd: be, duration: dur }),
+      body: JSON.stringify({
+        pilotId, pilotName: pilot.name, date, missionName, tailNumber, battery,
+        startTime, endTime, batteryStart: bs, batteryEnd: be, duration: dur,
+        observer: addForm.observer, gasDropped: addForm.gasDropped, gasDropTime: addForm.gasDropTime,
+      }),
     })
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4X-YAA', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '' })
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
     fetchDB()
   }
 
@@ -351,6 +385,7 @@ export default function AdminDashboard() {
         date: form.date, missionName: form.missionName, tailNumber: form.tailNumber,
         battery: form.battery, startTime: form.startTime, endTime: form.endTime,
         batteryStart: Number(form.batteryStart), batteryEnd: Number(form.batteryEnd), duration,
+        observer: form.observer, gasDropped: form.gasDropped, gasDropTime: form.gasDropTime,
       }),
     })
     setEditFlight(null)
@@ -670,6 +705,31 @@ export default function AdminDashboard() {
                 <input type="number" min="0" max="100" placeholder="40" value={addForm.batteryEnd}
                   onChange={e => setAddForm(f => ({ ...f, batteryEnd: e.target.value }))} className={inputCls} />
               </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                <input type="text" value={addForm.observer}
+                  onChange={e => setAddForm(f => ({ ...f, observer: e.target.value }))}
+                  placeholder="שם התצפיתן..." className={inputCls} />
+              </div>
+              {addForm.tailNumber === '4x-ujs' && (
+                <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" checked={addForm.gasDropped}
+                      onChange={e => setAddForm(f => ({ ...f, gasDropped: e.target.checked, gasDropTime: e.target.checked ? f.gasDropTime : '' }))}
+                      className="w-4 h-4 accent-amber-500" />
+                    <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
+                  </label>
+                  {addForm.gasDropped && (
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-amber-400/80 mb-1.5">שעת הטלה</label>
+                      <input type="time" value={addForm.gasDropTime}
+                        onChange={e => setAddForm(f => ({ ...f, gasDropTime: e.target.value }))}
+                        className={inputCls} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {addError && <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{addError}</div>}
             {addSuccess && (
@@ -702,7 +762,7 @@ export default function AdminDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/30 text-right">
-                    {['תאריך', 'טייס', 'משימה', 'זנב', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
+                    {['תאריך', 'טייס', 'משימה', 'תצפיתן', 'זנב', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
                     ))}
                   </tr>
@@ -715,7 +775,13 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
                       <td className="px-4 py-3 text-slate-300">{f.missionName}</td>
-                      <td className="px-4 py-3 text-slate-400 font-mono text-xs">{droneLabel(f.tailNumber)}</td>
+                      <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
+                      <td className="px-4 py-3 text-slate-400 font-mono text-xs">
+                        <div>{droneLabel(f.tailNumber)}</div>
+                        {f.gasDropped && (
+                          <div className="text-amber-400 mt-0.5">הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>
                       </td>

@@ -17,6 +17,9 @@ export interface Flight {
   batteryStart: number
   batteryEnd: number
   duration: number // minutes
+  observer: string
+  gasDropped: boolean
+  gasDropTime: string
 }
 
 export interface FlightDB {

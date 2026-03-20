@@ -20,6 +20,9 @@ function rowToFlight(row: any): Flight {
     batteryStart: row.battery_start,
     batteryEnd:   row.battery_end,
     duration:     row.duration,
+    observer:     row.observer     ?? '',
+    gasDropped:   row.gas_dropped  ?? false,
+    gasDropTime:  row.gas_drop_time ?? '',
   }
 }
 
@@ -63,6 +66,9 @@ export async function POST(req: NextRequest) {
       battery_start: Number(body.batteryStart),
       battery_end:   Number(body.batteryEnd),
       duration:      Number(body.duration),
+      observer:      body.observer      ?? '',
+      gas_dropped:   body.gasDropped    ?? false,
+      gas_drop_time: body.gasDropTime   || null,
     })
     .select()
     .single()
@@ -95,6 +101,9 @@ export async function PUT(req: NextRequest) {
     battery_start: body.batteryStart != null ? Number(body.batteryStart) : existing.battery_start,
     battery_end:   body.batteryEnd   != null ? Number(body.batteryEnd)   : existing.battery_end,
     duration:      body.duration     != null ? Number(body.duration)     : existing.duration,
+    observer:      body.observer     ?? existing.observer     ?? '',
+    gas_dropped:   body.gasDropped   ?? existing.gas_dropped  ?? false,
+    gas_drop_time: body.gasDropTime  ?? existing.gas_drop_time ?? null,
   }
 
   const { data, error } = await supabase
