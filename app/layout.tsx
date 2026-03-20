@@ -5,6 +5,7 @@ import Footer from '@/components/Footer'
 export const metadata: Metadata = {
   title: 'מערכת ניהול שעות טיסה | יחידת רחפנים',
   description: 'מערכת לניהול ומעקב שעות טיסה לטייסי רחפן',
+  icons: { icon: '/logo.png' },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
