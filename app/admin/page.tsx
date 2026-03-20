@@ -28,6 +28,38 @@ function batteryColor(pct: number) {
   return 'text-red-400'
 }
 
+// ── Excel export ───────────────────────────────────────────────────────────────
+type ExportRow = Record<string, string | number>
+
+function buildRows(flights: Flight[], opts: { pilot?: boolean; drone?: boolean }): ExportRow[] {
+  return [...flights].sort((a, b) => a.date.localeCompare(b.date)).map(f => {
+    const row: ExportRow = { 'תאריך': new Date(f.date).toLocaleDateString('he-IL'), 'משימה': f.missionName }
+    if (opts.pilot) row['טייס'] = f.pilotName
+    if (opts.drone) row['מספר זנב'] = f.tailNumber
+    return {
+      ...row,
+      'שעת המראה': f.startTime,
+      'שעת נחיתה': f.endTime,
+      'סוללה': f.battery,
+      '% התחלה': f.batteryStart,
+      '% סיום': f.batteryEnd,
+      'משך (דקות)': f.duration,
+      'משך': fmtHours(f.duration),
+      'תצפיתן': f.observer || '',
+    }
+  })
+}
+
+async function downloadExcel(rows: ExportRow[], filename: string) {
+  if (rows.length === 0) { alert('אין נתונים לייצוא'); return }
+  const XLSX = await import('xlsx')
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }))
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'טיסות')
+  XLSX.writeFile(wb, filename)
+}
+
 // ── Confirm dialog ────────────────────────────────────────────────────────────
 function ConfirmDialog({ message, onConfirm, onCancel }: {
   message: string
@@ -287,7 +319,7 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
 export default function AdminDashboard() {
   const router = useRouter()
   const [db, setDb] = useState<FlightDB | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots' | 'drones'>('overview')
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
@@ -521,6 +553,7 @@ export default function AdminDashboard() {
             { key: 'add', label: 'הוספת טיסה', icon: '➕' },
             { key: 'history', label: 'היסטוריה', icon: '📜' },
             { key: 'pilots', label: 'ניהול טייסים', icon: '👨‍✈️' },
+            { key: 'drones', label: 'ניהול רחפנים', icon: '🚁' },
           ] as const).map(({ key, label, icon }) => (
             <button key={key} onClick={() => setActiveTab(key)}
               className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
@@ -532,6 +565,16 @@ export default function AdminDashboard() {
 
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
+          <div className="space-y-6">
+          <div className="flex justify-end">
+            <button
+              onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_flights.xlsx')}
+              className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              ייצוא כללי לאקסל ({db.flights.length} טיסות)
+            </button>
+          </div>
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
               <h2 className="text-base font-semibold text-white mb-5 flex items-center gap-2">
@@ -595,6 +638,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
+          </div>
           </div>
         )}
 
@@ -822,8 +866,15 @@ export default function AdminDashboard() {
         {/* PILOTS */}
         {activeTab === 'pilots' && (
           <div className="space-y-5">
-            {/* Add button */}
-            <div className="flex justify-end">
+            {/* Top buttons */}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_pilots_flights.xlsx')}
+                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                ייצוא כללי
+              </button>
               <button
                 onClick={() => setEditPilot('add')}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all"
@@ -846,7 +897,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['#', 'שם', 'רישיון', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'פעולות'].map(h => (
+                      {['#', 'שם', 'רישיון', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
                         <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -880,6 +931,16 @@ export default function AdminDashboard() {
                             {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                           </td>
                           <td className="px-5 py-4">
+                            <button
+                              onClick={() => downloadExcel(buildRows(pFlights, { drone: true }), `${p.name}_flights.xlsx`)}
+                              disabled={pFlights.length === 0}
+                              className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                              ייצוא ({pFlights.length})
+                            </button>
+                          </td>
+                          <td className="px-5 py-4">
                             <div className="flex items-center gap-1.5">
                               <button
                                 onClick={() => setEditPilot(p)}
@@ -904,6 +965,73 @@ export default function AdminDashboard() {
                                 </svg>
                               </button>
                             </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DRONES */}
+        {activeTab === 'drones' && (
+          <div className="space-y-5">
+            <div className="flex justify-end">
+              <button
+                onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_drones_flights.xlsx')}
+                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                ייצוא כללי ({db.flights.length} טיסות)
+              </button>
+            </div>
+
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-slate-700/50">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <span className="text-blue-400">🚁</span> ניהול רחפנים ({DRONES.length})
+                </h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-700/30 text-right">
+                      {['דגם', 'מספר זנב', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'ייצוא לאקסל'].map(h => (
+                        <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/30">
+                    {DRONES.map(drone => {
+                      const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
+                      const totalMins = dFlights.reduce((a, f) => a + f.duration, 0)
+                      const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
+                      return (
+                        <tr key={drone.tailNumber} className="hover:bg-slate-700/20 transition-colors">
+                          <td className="px-5 py-4">
+                            <span className="text-sm font-medium text-white">{drone.model}</span>
+                          </td>
+                          <td className="px-5 py-4 text-slate-400 font-mono text-xs">{drone.tailNumber}</td>
+                          <td className="px-5 py-4 text-slate-300">{dFlights.length}</td>
+                          <td className="px-5 py-4 text-blue-400 font-medium">{fmtHours(totalMins)}</td>
+                          <td className="px-5 py-4 text-slate-400">
+                            {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
+                          </td>
+                          <td className="px-5 py-4">
+                            <button
+                              onClick={() => downloadExcel(
+                                buildRows(dFlights, { pilot: true }),
+                                `${drone.tailNumber}_flights.xlsx`
+                              )}
+                              disabled={dFlights.length === 0}
+                              className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-3 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                              ייצוא לאקסל ({dFlights.length})
+                            </button>
                           </td>
                         </tr>
                       )

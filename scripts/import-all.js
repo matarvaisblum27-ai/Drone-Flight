@@ -320,6 +320,14 @@ async function main() {
     console.log(`   ✅ Done`)
   }
 
+  // ── Detect schema: check if observer column exists ──────────────────────
+  const { data: sampleRow } = await supabase.from('flights').select('*').limit(1).single()
+  const hasObserverCol = sampleRow && 'observer' in sampleRow
+  if (!hasObserverCol) {
+    console.log('\n⚠️  observer/gas_dropped columns not found in DB — inserting without them.')
+    console.log('   Run scripts/migrate-add-observer-gas.sql in Supabase SQL Editor to add them.\n')
+  }
+
   // ── Phase 3: Build flight records, deduplicate ───────────────────────────
   const flightsToInsert = []
   const statsByPilot = {}
@@ -337,7 +345,7 @@ async function main() {
     statsByPilot[pilot.name] = (statsByPilot[pilot.name] || 0) + 1
     statsByDrone[f.tailNumber || 'unknown'] = (statsByDrone[f.tailNumber || 'unknown'] || 0) + 1
 
-    flightsToInsert.push({
+    const record = {
       id:            `imp_${Date.now()}_${Math.floor(Math.random() * 999999)}`,
       pilot_id:      pilot.id,
       pilot_name:    pilot.name,
@@ -350,10 +358,14 @@ async function main() {
       battery_start: f.batteryStart,
       battery_end:   f.batteryEnd,
       duration:      f.duration,
-      observer:      f.observer,
-      gas_dropped:   false,
-      gas_drop_time: null,
-    })
+    }
+    // Include new columns only if they exist in the schema
+    if (hasObserverCol) {
+      record.observer      = f.observer
+      record.gas_dropped   = false
+      record.gas_drop_time = null
+    }
+    flightsToInsert.push(record)
   }
 
   console.log(`\n✈️  Flights to insert: ${flightsToInsert.length}  (${skipped} skipped as duplicates/zero-duration)`)
