@@ -387,7 +387,7 @@ export default function AdminDashboard() {
     const dur = calcDuration(startTime, endTime)
     if (dur <= 0) { setAddError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
     const pilot = db.pilots.find(p => p.id === pilotId)!
-    await fetch('/api/flights', {
+    const res = await fetch('/api/flights', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pilotId, pilotName: pilot.name, date, missionName, tailNumber, battery,
@@ -395,6 +395,10 @@ export default function AdminDashboard() {
         observer: addForm.observer, gasDropped: addForm.gasDropped, gasDropTime: addForm.gasDropTime,
       }),
     })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      setAddError(err.error ?? `שגיאה בשמירה (${res.status})`); return
+    }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
     setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
     fetchDB()

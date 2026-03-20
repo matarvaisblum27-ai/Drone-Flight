@@ -51,27 +51,33 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
-  const { data, error } = await supabase
+  const baseRecord = {
+    id:            `f${Date.now()}`,
+    pilot_id:      body.pilotId,
+    pilot_name:    body.pilotName,
+    date:          body.date,
+    mission_name:  body.missionName,
+    tail_number:   body.tailNumber,
+    battery:       body.battery,
+    start_time:    body.startTime,
+    end_time:      body.endTime,
+    battery_start: Number(body.batteryStart),
+    battery_end:   Number(body.batteryEnd),
+    duration:      Number(body.duration),
+  }
+
+  // Try with optional new columns; fall back if migration hasn't run yet
+  let { data, error } = await supabase
     .from('flights')
-    .insert({
-      id:            `f${Date.now()}`,
-      pilot_id:      body.pilotId,
-      pilot_name:    body.pilotName,
-      date:          body.date,
-      mission_name:  body.missionName,
-      tail_number:   body.tailNumber,
-      battery:       body.battery,
-      start_time:    body.startTime,
-      end_time:      body.endTime,
-      battery_start: Number(body.batteryStart),
-      battery_end:   Number(body.batteryEnd),
-      duration:      Number(body.duration),
-      observer:      body.observer      ?? '',
-      gas_dropped:   body.gasDropped    ?? false,
-      gas_drop_time: body.gasDropTime   || null,
-    })
+    .insert({ ...baseRecord, observer: body.observer ?? '', gas_dropped: body.gasDropped ?? false, gas_drop_time: body.gasDropTime || null })
     .select()
     .single()
+
+  if (error?.message?.includes('column') || error?.message?.includes('schema cache')) {
+    const result = await supabase.from('flights').insert(baseRecord).select().single()
+    data  = result.data
+    error = result.error
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -106,8 +112,17 @@ export async function PUT(req: NextRequest) {
     gas_drop_time: body.gasDropTime  ?? existing.gas_drop_time ?? null,
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('flights').update(updates).eq('id', body.id).select().single()
+
+  if (error?.message?.includes('column') || error?.message?.includes('schema cache')) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { observer, gas_dropped, gas_drop_time, ...baseUpdates } = updates
+    const result = await supabase.from('flights').update(baseUpdates).eq('id', body.id).select().single()
+    data  = result.data
+    error = result.error
+  }
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   await supabase

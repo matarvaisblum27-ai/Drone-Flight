@@ -117,7 +117,7 @@ export default function PilotDashboard() {
 
     if (!pilot) { setFormError('שגיאה: טייס לא מזוהה'); return }
 
-    await fetch('/api/flights', {
+    const res = await fetch('/api/flights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -126,6 +126,10 @@ export default function PilotDashboard() {
         observer: form.observer, gasDropped: form.gasDropped, gasDropTime: form.gasDropTime,
       }),
     })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      setFormError(err.error ?? `שגיאה בשמירה (${res.status})`); return
+    }
     setFormSuccess('טיסה נרשמה בהצלחה!')
     setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
     fetchDB()
