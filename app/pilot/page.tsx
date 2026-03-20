@@ -2,9 +2,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB } from '@/lib/types'
+import { DRONES, droneLabel } from '@/lib/drones'
 
 const BATTERY_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
-const TAIL_NUMBERS = ['4X-YAA', '4X-YAB', '4X-YAC', '4X-YAD']
 
 function ConfirmDialog({ message, onConfirm, onCancel }: {
   message: string; onConfirm: () => void; onCancel: () => void
@@ -61,7 +61,7 @@ export default function PilotDashboard() {
   const [db, setDb] = useState<FlightDB | null>(null)
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
   const [form, setForm] = useState({
-    date: '', missionName: '', tailNumber: '4X-YAA',
+    date: '', missionName: '', tailNumber: '4x-pzk',
     battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
   })
   const [formError, setFormError] = useState('')
@@ -283,7 +283,7 @@ export default function PilotDashboard() {
                       <div>
                         <p className="text-sm font-medium text-white">{f.missionName}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {f.tailNumber} · סוללה {f.battery}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
@@ -322,7 +322,7 @@ export default function PilotDashboard() {
                 <select value={form.tailNumber}
                   onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value }))}
                   className={inputCls}>
-                  {TAIL_NUMBERS.map(t => <option key={t} value={t}>{t}</option>)}
+                  {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                 </select>
               </div>
               <div>
@@ -425,7 +425,7 @@ export default function PilotDashboard() {
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
                         <span>📅 {new Date(f.date).toLocaleDateString('he-IL')}</span>
-                        <span>✈️ {f.tailNumber}</span>
+                        <span>✈️ {droneLabel(f.tailNumber)}</span>
                         <span>🔋 סוללה {f.battery}: {f.batteryStart}% ← {f.batteryEnd}%</span>
                         <span>🕐 {f.startTime}–{f.endTime}</span>
                       </div>

@@ -2,10 +2,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, Flight, Pilot, PilotStats } from '@/lib/types'
+import { DRONES, droneLabel } from '@/lib/drones'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 const BATTERY_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
-const TAIL_NUMBERS = ['4X-YAA', '4X-YAB', '4X-YAC', '4X-YAD']
 
 function fmtHours(minutes: number) {
   const h = Math.floor(minutes / 60)
@@ -140,7 +140,7 @@ function EditModal({ flight, db, onSave, onCancel }: {
           <div>
             <label className={labelCls}>מספר זנב</label>
             <select value={form.tailNumber} onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
-              {TAIL_NUMBERS.map(t => <option key={t} value={t}>{t}</option>)}
+              {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
             </select>
           </div>
           <div>
@@ -260,7 +260,7 @@ export default function AdminDashboard() {
   const [db, setDb] = useState<FlightDB | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots'>('overview')
   const [addForm, setAddForm] = useState({
-    pilotId: '', date: '', missionName: '', tailNumber: '4X-YAA',
+    pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
   })
   const [addError, setAddError] = useState('')
@@ -643,7 +643,7 @@ export default function AdminDashboard() {
               <div>
                 <label className={labelCls}>מספר זנב</label>
                 <select value={addForm.tailNumber} onChange={e => setAddForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
-                  {TAIL_NUMBERS.map(t => <option key={t} value={t}>{t}</option>)}
+                  {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                 </select>
               </div>
               <div>
@@ -715,7 +715,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
                       <td className="px-4 py-3 text-slate-300">{f.missionName}</td>
-                      <td className="px-4 py-3 text-slate-400 font-mono text-xs">{f.tailNumber}</td>
+                      <td className="px-4 py-3 text-slate-400 font-mono text-xs">{droneLabel(f.tailNumber)}</td>
                       <td className="px-4 py-3">
                         <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>
                       </td>
