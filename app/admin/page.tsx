@@ -29,37 +29,129 @@ function batteryColor(pct: number) {
 }
 
 // ── Excel export ───────────────────────────────────────────────────────────────
-type ExportRow = Record<string, string | number>
+const HEBREW_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
+const MAX_FLIGHTS_PER_MISSION = 13
 
-function buildRows(flights: Flight[], opts: { pilot?: boolean; drone?: boolean }): ExportRow[] {
-  return [...flights].sort((a, b) => a.date.localeCompare(b.date)).map(f => {
-    const row: ExportRow = { 'תאריך': new Date(f.date).toLocaleDateString('he-IL'), 'משימה': f.missionName }
-    if (opts.pilot) row['טייס'] = f.pilotName
-    if (opts.drone) row['מספר זנב'] = f.tailNumber
-    return {
-      ...row,
-      'שעת המראה': f.startTime,
-      'שעת נחיתה': f.endTime,
-      'סוללה': f.battery,
-      '% התחלה': f.batteryStart,
-      '% סיום': f.batteryEnd,
-      'משך (דקות)': f.duration,
-      'משך': fmtHours(f.duration),
-      'תצפיתן': f.observer || '',
-      'הטלת גז': f.gasDropped ? 'כן' : 'לא',
-      'שעת הטלה': f.gasDropped && f.gasDropTime ? f.gasDropTime : '',
-    }
+function fmtDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return `${h}:${String(m).padStart(2, '0')}:00`
+}
+
+interface MissionData {
+  dateStr: string; month: number; missionName: string; flights: Flight[]
+  missionTotal: number; prevCumulative: number; cumulative: number
+}
+
+function groupMissions(flights: Flight[]): MissionData[] {
+  const sorted = [...flights].sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+  const missionMap = new Map<string, { dateStr: string; missionName: string; flights: Flight[] }>()
+  for (const f of sorted) {
+    const key = `${f.date}||${f.missionName}`
+    if (!missionMap.has(key)) missionMap.set(key, { dateStr: f.date, missionName: f.missionName, flights: [] })
+    missionMap.get(key)!.flights.push(f)
+  }
+  let cumulative = 0
+  return Array.from(missionMap.values()).map(({ dateStr, missionName, flights: mFlights }) => {
+    const month = new Date(dateStr).getMonth()
+    const missionTotal = mFlights.reduce((s: number, f: Flight) => s + f.duration, 0)
+    const prev = cumulative
+    cumulative += missionTotal
+    return { dateStr, month, missionName, flights: mFlights, missionTotal, prevCumulative: prev, cumulative }
   })
 }
 
-async function downloadExcel(rows: ExportRow[], filename: string) {
-  if (rows.length === 0) { alert('אין נתונים לייצוא'); return }
+function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel: (m: MissionData) => string): (string | number)[][] {
+  const pilotMap = new Map(pilots.map(p => [p.id, p]))
+  const rows: (string | number)[][] = []
+  for (const mission of missions) {
+    const date = new Date(mission.dateStr).toLocaleDateString('he-IL')
+    const uniquePilotIds = Array.from(new Set(mission.flights.map(f => f.pilotId)))
+    const pilot1 = pilotMap.get(uniquePilotIds[0])
+    const pilot2 = uniquePilotIds[1] ? pilotMap.get(uniquePilotIds[1]) : undefined
+    const observer = mission.flights.find(f => f.observer)?.observer ?? ''
+    rows.push([headerLabel(mission), date, mission.missionName, '', pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer])
+    rows.push(['', 'שעת התחלה', 'שעת סיום', 'שם מטיס', 'רישוי מטיס', 'סוללה', '% התחלה', '% סיום', "סה\"כ דק' טיסה"])
+    for (let i = 0; i < MAX_FLIGHTS_PER_MISSION; i++) {
+      const f = mission.flights[i]
+      if (f) {
+        const p = pilotMap.get(f.pilotId)
+        rows.push([i + 1, f.startTime, f.endTime, f.pilotName, p?.license ?? '', f.battery, f.batteryStart, f.batteryEnd, fmtDuration(f.duration)])
+      } else {
+        rows.push([i + 1, '', '', '', '', '', '', '', '0:00:00'])
+      }
+    }
+    rows.push(["סה\"כ למשימה", '', '', '', '', '', '', '', fmtDuration(mission.missionTotal)])
+    rows.push(["סיכום מדף קודם", '', '', '', '', '', '', '', fmtDuration(mission.prevCumulative)])
+    rows.push(["סה\"כ מצטבר", '', '', '', '', '', '', '', fmtDuration(mission.cumulative)])
+    rows.push(Array(9).fill(''))
+  }
+  return rows
+}
+
+async function downloadDroneExcel(flights: Flight[], pilots: Pilot[], tailNumber: string) {
+  if (!flights.length) { alert('אין נתונים לייצוא'); return }
   const XLSX = await import('xlsx')
-  const ws = XLSX.utils.json_to_sheet(rows)
-  ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }))
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'טיסות')
-  XLSX.writeFile(wb, filename)
+  const missions = groupMissions(flights)
+  for (let m = 0; m < 12; m++) {
+    const mm = missions.filter(x => x.month === m)
+    if (!mm.length) continue
+    const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(mm, pilots, () => tailNumber))
+    ws['!cols'] = Array(9).fill({ wch: 16 })
+    XLSX.utils.book_append_sheet(wb, ws, HEBREW_MONTHS[m])
+  }
+  if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
+  XLSX.writeFile(wb, `${tailNumber}_logbook.xlsx`)
+}
+
+async function downloadPilotExcel(flights: Flight[], pilots: Pilot[], pilotName: string) {
+  if (!flights.length) { alert('אין נתונים לייצוא'); return }
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const missions = groupMissions(flights)
+  for (let m = 0; m < 12; m++) {
+    const mm = missions.filter(x => x.month === m)
+    if (!mm.length) continue
+    const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(mm, pilots, x => x.flights[0].tailNumber))
+    ws['!cols'] = Array(9).fill({ wch: 16 })
+    XLSX.utils.book_append_sheet(wb, ws, HEBREW_MONTHS[m])
+  }
+  if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
+  XLSX.writeFile(wb, `${pilotName}_logbook.xlsx`)
+}
+
+async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[]) {
+  if (!flights.length) { alert('אין נתונים לייצוא'); return }
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const seenModels = new Set<string>()
+  for (const drone of DRONES) {
+    if (seenModels.has(drone.model)) continue
+    seenModels.add(drone.model)
+    const tails = DRONES.filter(d => d.model === drone.model).map(d => d.tailNumber)
+    const mf = flights.filter(f => tails.includes(f.tailNumber))
+    if (!mf.length) continue
+    const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(groupMissions(mf), pilots, x => x.flights[0].tailNumber))
+    ws['!cols'] = Array(9).fill({ wch: 16 })
+    XLSX.utils.book_append_sheet(wb, ws, drone.model)
+  }
+  const gasFlights = [...flights].filter(f => f.gasDropped).sort((a, b) => a.date.localeCompare(b.date))
+  if (gasFlights.length) {
+    const gasRows: (string | number)[][] = [["תאריך", "מס' זנב", "משימה", "שם מטיס", "שעת הטלה"]]
+    for (const f of gasFlights) gasRows.push([new Date(f.date).toLocaleDateString('he-IL'), f.tailNumber, f.missionName, f.pilotName, f.gasDropTime ?? ''])
+    const ws = XLSX.utils.aoa_to_sheet(gasRows)
+    ws['!cols'] = Array(5).fill({ wch: 18 })
+    XLSX.utils.book_append_sheet(wb, ws, 'הטלות גז')
+  }
+  const practiceFlights = flights.filter(f => f.missionName.includes('תרגול'))
+  if (practiceFlights.length) {
+    const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(groupMissions(practiceFlights), pilots, x => x.flights[0].tailNumber))
+    ws['!cols'] = Array(9).fill({ wch: 16 })
+    XLSX.utils.book_append_sheet(wb, ws, 'תרגול חודשי')
+  }
+  if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
+  XLSX.writeFile(wb, 'logbook_general.xlsx')
 }
 
 // ── Confirm dialog ────────────────────────────────────────────────────────────
@@ -609,7 +701,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           <div className="space-y-6">
           <div className="flex justify-end">
             <button
-              onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_flights.xlsx')}
+              onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
               className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -913,7 +1005,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             {/* Top buttons */}
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_pilots_flights.xlsx')}
+                onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
                 className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -976,7 +1068,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           </td>
                           <td className="px-5 py-4">
                             <button
-                              onClick={() => downloadExcel(buildRows(pFlights, { drone: true }), `${p.name}_flights.xlsx`)}
+                              onClick={() => downloadPilotExcel(pFlights, db.pilots, p.name)}
                               disabled={pFlights.length === 0}
                               className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                             >
@@ -1025,7 +1117,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           <div className="space-y-5">
             <div className="flex justify-end">
               <button
-                onClick={() => downloadExcel(buildRows(db.flights, { pilot: true, drone: true }), 'all_drones_flights.xlsx')}
+                onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
                 className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -1066,10 +1158,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           </td>
                           <td className="px-5 py-4">
                             <button
-                              onClick={() => downloadExcel(
-                                buildRows(dFlights, { pilot: true }),
-                                `${drone.tailNumber}_flights.xlsx`
-                              )}
+                              onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
                               disabled={dFlights.length === 0}
                               className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-3 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                             >
