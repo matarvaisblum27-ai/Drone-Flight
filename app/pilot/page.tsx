@@ -371,7 +371,7 @@ export default function PilotDashboard() {
                   onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
                   placeholder="שם התצפיתן..." className={inputCls} />
               </div>
-              {form.tailNumber === '4x-ujs' && (
+              {(form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg') && (
                 <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
                   <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
                   <label className="flex items-center gap-3 cursor-pointer">
