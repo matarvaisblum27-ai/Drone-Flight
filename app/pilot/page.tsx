@@ -289,7 +289,7 @@ export default function PilotDashboard() {
                       <div>
                         <p className="text-sm font-medium text-white">{f.missionName}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}{f.observer ? ` · ${f.observer}` : ''}{f.gasDropped ? ` · הטלת גז${f.gasDropTime ? ` ${f.gasDropTime}` : ''}` : ''}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}{f.observer ? ` · 👁 ${f.observer}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</span> : ''}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
@@ -460,7 +460,11 @@ export default function PilotDashboard() {
                         <span>🔋 סוללה {f.battery}: {f.batteryStart}% ← {f.batteryEnd}%</span>
                         <span>🕐 {f.startTime}–{f.endTime}</span>
                         {f.observer && <span>👁 {f.observer}</span>}
-                        {f.gasDropped && <span className="text-amber-400">הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</span>}
+                        {f.gasDropped && (
+                          <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
+                            💧 הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-start gap-3 flex-shrink-0">

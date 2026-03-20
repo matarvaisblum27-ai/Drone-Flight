@@ -46,6 +46,8 @@ function buildRows(flights: Flight[], opts: { pilot?: boolean; drone?: boolean }
       'משך (דקות)': f.duration,
       'משך': fmtHours(f.duration),
       'תצפיתן': f.observer || '',
+      'הטלת גז': f.gasDropped ? 'כן' : 'לא',
+      'שעת הטלה': f.gasDropped && f.gasDropTime ? f.gasDropTime : '',
     }
   })
 }
@@ -810,7 +812,7 @@ export default function AdminDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/30 text-right">
-                    {['תאריך', 'טייס', 'משימה', 'תצפיתן', 'זנב', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
+                    {['תאריך', 'טייס', 'משימה', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
                     ))}
                   </tr>
@@ -825,10 +827,13 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3 text-slate-300">{f.missionName}</td>
                       <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
                       <td className="px-4 py-3 text-slate-400 font-mono text-xs">
-                        <div>{droneLabel(f.tailNumber)}</div>
-                        {f.gasDropped && (
-                          <div className="text-amber-400 mt-0.5">הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</div>
-                        )}
+                        {droneLabel(f.tailNumber)}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {f.gasDropped
+                          ? <span className="text-amber-400 font-medium">✓{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</span>
+                          : <span className="text-slate-600">—</span>
+                        }
                       </td>
                       <td className="px-4 py-3">
                         <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>
