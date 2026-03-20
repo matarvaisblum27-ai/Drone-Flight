@@ -399,7 +399,7 @@ export default function AdminDashboard() {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      setAddError(err.error ?? `שגיאה בשמירה (${res.status})`); return
+      setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
     setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
@@ -533,6 +533,41 @@ export default function AdminDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+        {/* ── Migration warning ─────────────────────────────────────────── */}
+        {db.migrationNeeded && (
+          <div className="bg-red-900/30 border-2 border-red-500/60 rounded-xl p-5 text-right" dir="rtl">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl flex-shrink-0">⚠️</span>
+              <div className="flex-1">
+                <p className="text-red-300 font-bold text-base mb-1">נדרש עדכון בסיס נתונים</p>
+                <p className="text-red-400/90 text-sm mb-3">
+                  עמודות observer / gas_dropped / gas_drop_time חסרות בטבלת flights.
+                  שדות תצפיתן והטלת גז <strong>לא יישמרו</strong> עד להרצת ה-SQL הבא ב-Supabase.
+                </p>
+                <p className="text-xs text-slate-400 mb-2">
+                  פתח את{' '}
+                  <a
+                    href={`https://supabase.com/dashboard/project/${(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').match(/\/\/([^.]+)/)?.[1] ?? '_'}/sql`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 underline"
+                  >
+                    Supabase SQL Editor
+                  </a>
+                  , הדבק את ה-SQL הבא ולחץ Run:
+                </p>
+                <pre className="bg-slate-900/70 border border-slate-700 rounded-lg p-3 text-xs text-green-300 text-left font-mono whitespace-pre-wrap select-all">
+{`ALTER TABLE flights ADD COLUMN IF NOT EXISTS observer TEXT DEFAULT '';
+ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_dropped BOOLEAN DEFAULT FALSE;
+ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
+                </pre>
+                <p className="text-xs text-slate-500 mt-2">לאחר הרצת ה-SQL, רענן את הדף.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[

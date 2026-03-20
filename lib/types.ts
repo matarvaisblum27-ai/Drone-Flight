@@ -26,6 +26,7 @@ export interface FlightDB {
   pilots: Pilot[]
   flights: Flight[]
   batteries: Record<string, number>
+  migrationNeeded?: boolean
 }
 
 export interface PilotStats {

@@ -26,11 +26,18 @@ function rowToFlight(row: any): Flight {
   }
 }
 
+// Check whether the observer/gas columns exist in flights
+async function hasMigration(): Promise<boolean> {
+  const { error } = await supabase.from('flights').select('observer').limit(1)
+  return !error
+}
+
 export async function GET() {
-  const [pilotsRes, flightsRes, batteriesRes] = await Promise.all([
+  const [pilotsRes, flightsRes, batteriesRes, migrated] = await Promise.all([
     supabase.from('pilots').select('*').order('name'),
     supabase.from('flights').select('*').order('date').order('start_time'),
     supabase.from('batteries').select('*'),
+    hasMigration(),
   ])
 
   if (pilotsRes.error)    return NextResponse.json({ error: pilotsRes.error.message },    { status: 500 })
@@ -44,12 +51,21 @@ export async function GET() {
     pilots:  pilotsRes.data,
     flights: flightsRes.data.map(rowToFlight),
     batteries,
+    migrationNeeded: !migrated,
   }
   return NextResponse.json(db)
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
+
+  // Check migration first so we return a clear error instead of silent data loss
+  if (!(await hasMigration())) {
+    return NextResponse.json({
+      error: 'DB_MIGRATION_NEEDED',
+      message: 'עמודות observer/gas_dropped/gas_drop_time חסרות בטבלת flights. יש להריץ את ה-migration SQL ב-Supabase SQL Editor.',
+    }, { status: 500 })
+  }
 
   const baseRecord = {
     id:            `f${Date.now()}`,
@@ -64,20 +80,16 @@ export async function POST(req: NextRequest) {
     battery_start: Number(body.batteryStart),
     battery_end:   Number(body.batteryEnd),
     duration:      Number(body.duration),
+    observer:      body.observer    ?? '',
+    gas_dropped:   body.gasDropped  ?? false,
+    gas_drop_time: body.gasDropTime || null,
   }
 
-  // Try with optional new columns; fall back if migration hasn't run yet
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('flights')
-    .insert({ ...baseRecord, observer: body.observer ?? '', gas_dropped: body.gasDropped ?? false, gas_drop_time: body.gasDropTime || null })
+    .insert(baseRecord)
     .select()
     .single()
-
-  if (error?.message?.includes('column') || error?.message?.includes('schema cache')) {
-    const result = await supabase.from('flights').insert(baseRecord).select().single()
-    data  = result.data
-    error = result.error
-  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -95,7 +107,9 @@ export async function PUT(req: NextRequest) {
     .from('flights').select('*').eq('id', body.id).single()
   if (fetchErr || !existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  const updates = {
+  const migrated = await hasMigration()
+
+  const updates: Record<string, unknown> = {
     pilot_id:      body.pilotId     ?? existing.pilot_id,
     pilot_name:    body.pilotName   ?? existing.pilot_name,
     date:          body.date        ?? existing.date,
@@ -107,21 +121,16 @@ export async function PUT(req: NextRequest) {
     battery_start: body.batteryStart != null ? Number(body.batteryStart) : existing.battery_start,
     battery_end:   body.batteryEnd   != null ? Number(body.batteryEnd)   : existing.battery_end,
     duration:      body.duration     != null ? Number(body.duration)     : existing.duration,
-    observer:      body.observer     ?? existing.observer     ?? '',
-    gas_dropped:   body.gasDropped   ?? existing.gas_dropped  ?? false,
-    gas_drop_time: body.gasDropTime  ?? existing.gas_drop_time ?? null,
   }
 
-  let { data, error } = await supabase
+  if (migrated) {
+    updates.observer      = body.observer     ?? existing.observer     ?? ''
+    updates.gas_dropped   = body.gasDropped   ?? existing.gas_dropped  ?? false
+    updates.gas_drop_time = body.gasDropTime  ?? existing.gas_drop_time ?? null
+  }
+
+  const { data, error } = await supabase
     .from('flights').update(updates).eq('id', body.id).select().single()
-
-  if (error?.message?.includes('column') || error?.message?.includes('schema cache')) {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { observer, gas_dropped, gas_drop_time, ...baseUpdates } = updates
-    const result = await supabase.from('flights').update(baseUpdates).eq('id', body.id).select().single()
-    data  = result.data
-    error = result.error
-  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

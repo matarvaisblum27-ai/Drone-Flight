@@ -128,7 +128,7 @@ export default function PilotDashboard() {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      setFormError(err.error ?? `שגיאה בשמירה (${res.status})`); return
+      setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד לעדכון בסיס הנתונים' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
     setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
