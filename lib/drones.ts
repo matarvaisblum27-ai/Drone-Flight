@@ -7,6 +7,9 @@ export const DRONES: { model: string; tailNumber: string }[] = [
   { model: 'מאטריס 300', tailNumber: '4x-xtu' },
   { model: 'מאטריס 600 רחפן גז', tailNumber: '4x-xpg' },
   { model: 'רחפן גז G3', tailNumber: '4x-ujs' },
+  { model: 'מאטריס 30', tailNumber: '1005254' },
+  { model: 'מאטריס 30', tailNumber: '1005189' },
+  { model: 'מאטריס 30', tailNumber: '1005187' },
 ]
 
 export const TAIL_NUMBERS = DRONES.map(d => d.tailNumber)
