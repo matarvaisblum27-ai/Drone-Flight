@@ -69,9 +69,15 @@ export async function PUT(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updates: Record<string, any> = { name, license }
 
-  // Admin toggle — cannot demote אורן וייסבלום
+  // Only אורן וייסבלום can change is_admin — check caller identity via session cookie
   if (body.isAdmin !== undefined && existing.name !== ADMIN_NAME) {
-    updates.is_admin = !!body.isAdmin
+    const { verifySession, COOKIE_NAME } = await import('@/lib/auth')
+    const token = req.cookies.get(COOKIE_NAME)?.value
+    const session = token ? await verifySession(token) : null
+    if (session?.name === ADMIN_NAME) {
+      updates.is_admin = !!body.isAdmin
+    }
+    // silently ignore the field if caller is not אורן
   }
 
   // Password reset by admin

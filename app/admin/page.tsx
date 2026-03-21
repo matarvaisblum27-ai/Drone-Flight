@@ -391,10 +391,11 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
 
 // ── Pilot edit modal ──────────────────────────────────────────────────────────
 const ADMIN_FIXED_NAME = 'אורן וייסבלום'
-function PilotEditModal({ pilot, onSave, onCancel }: {
+function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
   pilot: Pilot | null  // null = add mode
   onSave: (name: string, license: string, password: string, isAdmin: boolean) => void
   onCancel: () => void
+  canManageAdmin: boolean  // only אורן וייסבלום can change this
 }) {
   const [name, setName] = useState(pilot?.name ?? '')
   const [license, setLicense] = useState(pilot?.license ?? '')
@@ -447,7 +448,7 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
               placeholder={isAdd ? 'הזן סיסמה' : '••••••••'}
               className={inputCls} />
           </div>
-          {!isFixedAdmin && (
+          {canManageAdmin && !isFixedAdmin && (
             <div className="flex items-center justify-between bg-slate-700/40 border border-slate-600/40 rounded-lg px-3 py-2.5">
               <div>
                 <p className="text-sm text-white font-medium">הרשאת מנהל</p>
@@ -461,7 +462,7 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
               </button>
             </div>
           )}
-          {isFixedAdmin && (
+          {canManageAdmin && isFixedAdmin && (
             <div className="flex items-center gap-2 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
               <span className="text-xs text-blue-400">מפקד ראשי — הרשאות מנהל קבועות</span>
             </div>
@@ -949,6 +950,7 @@ export default function AdminDashboard() {
           pilot={editPilot === 'add' ? null : editPilot as Pilot}
           onSave={editPilot === 'add' ? handleAddPilot : handleEditPilot}
           onCancel={() => setEditPilot(null)}
+          canManageAdmin={currentUserName === ADMIN_NAME}
         />
       )}
       {editDroneModal !== null && (
