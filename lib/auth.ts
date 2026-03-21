@@ -13,7 +13,8 @@ function getSecret(): Uint8Array {
 export interface SessionPayload {
   pilotId: string
   name: string
-  isAdmin: boolean
+  isAdmin: boolean   // true ONLY for אורן וייסבלום (hardcoded)
+  isViewer: boolean  // true for pilots granted "הרשאת סגן" (is_admin=true in DB)
 }
 
 export async function signSession(payload: SessionPayload): Promise<string> {

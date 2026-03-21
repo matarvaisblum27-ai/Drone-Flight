@@ -643,16 +643,34 @@ export default function AdminDashboard() {
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
   const [currentUserName, setCurrentUserName] = useState<string>('')
+  // authChecked gates all data loading — nothing renders until DB permission is confirmed
+  const [authChecked, setAuthChecked] = useState(false)
 
-  useEffect(() => {
-    fetch('/api/auth/me').then(async r => {
+  const checkPermissions = useCallback(async () => {
+    try {
+      // /api/auth/check reads is_admin FRESH from Supabase on every call — no JWT cache
+      const r = await fetch('/api/auth/check', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      })
       if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
-      // Allow admin (אורן) and סגן; regular pilots go to their own dashboard
+      // If DB says not admin and not סגן → kick to regular pilot dashboard immediately
       if (!s.isAdmin && !s.isViewer) { window.location.href = '/pilot'; return }
       setCurrentUserName(s.name)
-    }).catch(() => { window.location.href = '/' })
+      setAuthChecked(true)
+    } catch {
+      window.location.href = '/'
+    }
   }, [])
+
+  // Run permission check on every page load and whenever the tab regains focus
+  useEffect(() => {
+    checkPermissions()
+    const onFocus = () => checkPermissions()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [checkPermissions])
 
   // Only אורן וייסבלום can add/edit/delete data
   const canEdit = currentUserName === ADMIN_NAME
@@ -676,9 +694,10 @@ export default function AdminDashboard() {
     if (res.ok) setGasDrops(await res.json())
   }, [])
 
-  useEffect(() => { fetchDB() }, [fetchDB])
-  useEffect(() => { fetchDroneData() }, [fetchDroneData])
-  useEffect(() => { fetchGasDrops() }, [fetchGasDrops])
+  // Data loading is gated — only starts after DB confirms permission
+  useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
+  useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
+  useEffect(() => { if (authChecked) fetchGasDrops() }, [authChecked, fetchGasDrops])
 
   if (!db) {
     return (

@@ -145,9 +145,14 @@ export default function PilotDashboard() {
   const [showChangePwd, setShowChangePwd] = useState(false)
 
   useEffect(() => {
-    fetch('/api/auth/me').then(async r => {
+    // /api/auth/check reads is_admin FRESH from Supabase — no JWT cache
+    fetch('/api/auth/check', {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    }).then(async r => {
       if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
+      // Only the true admin (אורן) is forced to the admin dashboard
       if (s.isAdmin) { window.location.href = '/admin'; return }
       setUserName(s.name)
     }).catch(() => { window.location.href = '/' })

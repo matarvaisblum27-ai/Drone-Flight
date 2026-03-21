@@ -61,11 +61,12 @@ export async function POST(req: NextRequest) {
 
     logAttempt(name, true, ip)
 
-    const isAdmin = pilot.name === ADMIN_NAME || pilot.is_admin === true
+    const isAdmin = pilot.name === ADMIN_NAME                          // ONLY אורן
+    const isViewer = !isAdmin && pilot.is_admin === true               // granted "הרשאת סגן"
 
-    const token = await signSession({ pilotId: pilot.id, name: pilot.name, isAdmin })
+    const token = await signSession({ pilotId: pilot.id, name: pilot.name, isAdmin, isViewer })
 
-    const res = NextResponse.json({ ok: true, name: pilot.name, isAdmin })
+    const res = NextResponse.json({ ok: true, name: pilot.name, isAdmin, isViewer })
     res.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
