@@ -36,3 +36,20 @@ export interface PilotStats {
   lastFlightDate: string
   lastDuration: number
 }
+
+export interface DroneInfo {
+  tailNumber: string
+  model: string
+  weightKg: number | null
+  serialNumber: string
+  extraRegistration: string | null
+}
+
+export interface DroneBattery {
+  id: string
+  tailNumber: string
+  setName: string
+  cycle1: number | null
+  cycle2: number | null
+  inspectionDate: string
+}

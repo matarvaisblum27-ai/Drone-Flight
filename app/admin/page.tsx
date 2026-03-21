@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, Flight, Pilot, PilotStats } from '@/lib/types'
+import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 
 const ADMIN_NAME = 'אורן וייסבלום'
@@ -409,6 +409,110 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
   )
 }
 
+// ── Drone edit modal ──────────────────────────────────────────────────────────
+function DroneEditModal({ drone, onSave, onCancel }: {
+  drone: DroneInfo
+  onSave: (d: DroneInfo) => void
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState({
+    model:             drone.model,
+    weightKg:          drone.weightKg != null ? String(drone.weightKg) : '',
+    serialNumber:      drone.serialNumber,
+    extraRegistration: drone.extraRegistration ?? '',
+  })
+  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 className="text-base font-semibold text-white mb-5">עריכת רחפן — <span className="font-mono text-blue-400">{drone.tailNumber}</span></h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">דגם</label>
+            <input value={form.model} onChange={e => setForm(p => ({ ...p, model: e.target.value }))} className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">משקל (ק&quot;ג)</label>
+            <input value={form.weightKg} onChange={e => setForm(p => ({ ...p, weightKg: e.target.value }))} type="number" placeholder="למשל: 4" className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">מס&apos; סידורי (S.N)</label>
+            <input value={form.serialNumber} onChange={e => setForm(p => ({ ...p, serialNumber: e.target.value }))} className={`${cls} font-mono`} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">רישום נוסף</label>
+            <input value={form.extraRegistration} onChange={e => setForm(p => ({ ...p, extraRegistration: e.target.value }))} className={cls} />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">ביטול</button>
+          <button
+            onClick={() => onSave({ ...drone, model: form.model, weightKg: form.weightKg ? Number(form.weightKg) : null, serialNumber: form.serialNumber, extraRegistration: form.extraRegistration || null })}
+            className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
+            שמור שינויים
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Battery edit / add modal ───────────────────────────────────────────────────
+function BatteryModal({ battery, tailNumber, onSave, onCancel }: {
+  battery: DroneBattery | null
+  tailNumber: string
+  onSave: (b: Partial<DroneBattery> & { tailNumber: string }) => void
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState({
+    setName:        battery?.setName ?? '',
+    cycle1:         battery?.cycle1 != null ? String(battery.cycle1) : '',
+    cycle2:         battery?.cycle2 != null ? String(battery.cycle2) : '',
+    inspectionDate: battery?.inspectionDate ?? '',
+  })
+  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 className="text-base font-semibold text-white mb-5">{battery ? 'עריכת סוללה' : 'הוספת סוללה'}</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">שם סט</label>
+            <input value={form.setName} onChange={e => setForm(p => ({ ...p, setName: e.target.value }))} placeholder="למשל: סט 1" className={cls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">מחזור (סוללה 1)</label>
+              <input value={form.cycle1} onChange={e => setForm(p => ({ ...p, cycle1: e.target.value }))} type="number" placeholder="287" className={cls} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">מחזור (סוללה 2)</label>
+              <input value={form.cycle2} onChange={e => setForm(p => ({ ...p, cycle2: e.target.value }))} type="number" placeholder="282" className={cls} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">תאריך בדיקה</label>
+            <input value={form.inspectionDate} onChange={e => setForm(p => ({ ...p, inspectionDate: e.target.value }))} placeholder="16.4.25" className={cls} />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">ביטול</button>
+          <button
+            onClick={() => {
+              if (!form.setName.trim()) { alert('יש להזין שם סט'); return }
+              onSave({ id: battery?.id, tailNumber, setName: form.setName.trim(), cycle1: form.cycle1 ? Number(form.cycle1) : null, cycle2: form.cycle2 ? Number(form.cycle2) : null, inspectionDate: form.inspectionDate })
+            }}
+            className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
+            {battery ? 'שמור' : 'הוסף'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const router = useRouter()
@@ -426,6 +530,12 @@ export default function AdminDashboard() {
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
   const [editFlight, setEditFlight] = useState<Flight | null>(null)
   const [editPilot, setEditPilot] = useState<Pilot | 'add' | null>(null)
+  const [droneDetails, setDroneDetails] = useState<DroneInfo[]>([])
+  const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
+  const [expandedDrone, setExpandedDrone] = useState<string | null>(null)
+  const [editDroneModal, setEditDroneModal] = useState<DroneInfo | null>(null)
+  const [batteryModal, setBatteryModal] = useState<{ battery: DroneBattery | null; tailNumber: string } | null>(null)
+  const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
 
   useEffect(() => {
     const user = sessionStorage.getItem('currentUser')
@@ -437,7 +547,17 @@ export default function AdminDashboard() {
     setDb(await res.json())
   }, [])
 
+  const fetchDroneData = useCallback(async () => {
+    const [dronesRes, batteriesRes] = await Promise.all([
+      fetch('/api/drones', { cache: 'no-store' }),
+      fetch('/api/drone-batteries', { cache: 'no-store' }),
+    ])
+    if (dronesRes.ok) setDroneDetails(await dronesRes.json())
+    if (batteriesRes.ok) setDroneBatteries(await batteriesRes.json())
+  }, [])
+
   useEffect(() => { fetchDB() }, [fetchDB])
+  useEffect(() => { fetchDroneData() }, [fetchDroneData])
 
   if (!db) {
     return (
@@ -562,6 +682,28 @@ export default function AdminDashboard() {
     fetchDB()
   }
 
+  const handleEditDrone = async (drone: DroneInfo) => {
+    const res = await fetch('/api/drones', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(drone) })
+    if (!res.ok) { alert('שגיאה בעדכון רחפן'); return }
+    setEditDroneModal(null)
+    fetchDroneData()
+  }
+
+  const handleSaveBattery = async (b: Partial<DroneBattery> & { tailNumber: string }) => {
+    const method = b.id ? 'PUT' : 'POST'
+    const res = await fetch('/api/drone-batteries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    if (!res.ok) { alert(b.id ? 'שגיאה בעדכון סוללה' : 'שגיאה בהוספת סוללה'); return }
+    setBatteryModal(null)
+    fetchDroneData()
+  }
+
+  const handleDeleteBattery = async (id: string) => {
+    const res = await fetch(`/api/drone-batteries?id=${id}`, { method: 'DELETE' })
+    if (!res.ok) { alert('שגיאה במחיקת סוללה'); return }
+    setConfirmBatteryId(null)
+    fetchDroneData()
+  }
+
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
@@ -596,6 +738,19 @@ export default function AdminDashboard() {
           pilot={editPilot === 'add' ? null : editPilot as Pilot}
           onSave={editPilot === 'add' ? handleAddPilot : handleEditPilot}
           onCancel={() => setEditPilot(null)}
+        />
+      )}
+      {editDroneModal && (
+        <DroneEditModal drone={editDroneModal} onSave={handleEditDrone} onCancel={() => setEditDroneModal(null)} />
+      )}
+      {batteryModal && (
+        <BatteryModal battery={batteryModal.battery} tailNumber={batteryModal.tailNumber} onSave={handleSaveBattery} onCancel={() => setBatteryModal(null)} />
+      )}
+      {confirmBatteryId && (
+        <ConfirmDialog
+          message="פעולה זו תמחק את רשומת הסוללה לצמיתות."
+          onConfirm={() => handleDeleteBattery(confirmBatteryId)}
+          onCancel={() => setConfirmBatteryId(null)}
         />
       )}
 
@@ -1128,45 +1283,136 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                  <span className="text-blue-400">🚁</span> ניהול רחפנים ({DRONES.length})
+                  <span className="text-blue-400">🚁</span> ניהול רחפנים ({droneDetails.length || DRONES.length})
                 </h2>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['דגם', 'מספר זנב', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'ייצוא לאקסל'].map(h => (
-                        <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
+                      {['דגם', 'מס\' זנב', 'משקל', 'מס\' סידורי (S.N)', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'פעולות'].map(h => (
+                        <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-700/30">
-                    {DRONES.map(drone => {
+                  <tbody>
+                    {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: null, serialNumber: '', extraRegistration: null }))).map(drone => {
                       const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
-                      const totalMins = dFlights.reduce((a, f) => a + f.duration, 0)
+                      const totalMins = dFlights.reduce((a: number, f: Flight) => a + f.duration, 0)
                       const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
+                      const batteries = droneBatteries.filter(b => b.tailNumber === drone.tailNumber)
+                      const isExpanded = expandedDrone === drone.tailNumber
                       return (
-                        <tr key={drone.tailNumber} className="hover:bg-slate-700/20 transition-colors">
-                          <td className="px-5 py-4">
-                            <span className="text-sm font-medium text-white">{drone.model}</span>
-                          </td>
-                          <td className="px-5 py-4 text-slate-400 font-mono text-xs">{drone.tailNumber}</td>
-                          <td className="px-5 py-4 text-slate-300">{dFlights.length}</td>
-                          <td className="px-5 py-4 text-blue-400 font-medium">{fmtHours(totalMins)}</td>
-                          <td className="px-5 py-4 text-slate-400">
-                            {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
-                          </td>
-                          <td className="px-5 py-4">
-                            <button
-                              onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
-                              disabled={dFlights.length === 0}
-                              className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-3 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                              ייצוא לאקסל ({dFlights.length})
-                            </button>
-                          </td>
-                        </tr>
+                        <>
+                          <tr key={drone.tailNumber} className={`border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors ${isExpanded ? 'bg-slate-700/30' : ''}`}>
+                            <td className="px-4 py-3">
+                              <span className="text-sm font-medium text-white">{drone.model}</span>
+                              {drone.extraRegistration && (
+                                <span className="block text-xs text-slate-500 font-mono mt-0.5">{drone.extraRegistration}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-blue-300 font-mono text-xs">{drone.tailNumber}</td>
+                            <td className="px-4 py-3 text-slate-300 text-xs">
+                              {drone.weightKg != null ? `${drone.weightKg} ק"ג` : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="text-xs font-mono text-slate-400 break-all">{drone.serialNumber || '—'}</span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-300 text-center">{dFlights.length}</td>
+                            <td className="px-4 py-3 text-blue-400 font-medium">{fmtHours(totalMins)}</td>
+                            <td className="px-4 py-3 text-slate-400 text-xs">
+                              {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* Edit drone */}
+                                <button
+                                  onClick={() => setEditDroneModal(drone)}
+                                  className="text-xs text-slate-300 hover:text-white bg-slate-700/60 hover:bg-slate-600 border border-slate-600/40 px-2.5 py-1.5 rounded-lg transition-all"
+                                  title="עריכה"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+                                {/* Batteries toggle */}
+                                <button
+                                  onClick={() => setExpandedDrone(isExpanded ? null : drone.tailNumber)}
+                                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${isExpanded ? 'bg-amber-900/40 border-amber-700/50 text-amber-300' : 'bg-slate-700/60 border-slate-600/40 text-slate-300 hover:text-white hover:bg-slate-600'}`}
+                                >
+                                  🔋 {batteries.length > 0 ? `${batteries.length} סטים` : 'סוללות'}
+                                </button>
+                                {/* Excel */}
+                                <button
+                                  onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
+                                  disabled={dFlights.length === 0}
+                                  className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                  XLS
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {/* Expandable battery rows */}
+                          {isExpanded && (
+                            <tr key={`${drone.tailNumber}-batteries`} className="bg-slate-900/60 border-b border-slate-700/30">
+                              <td colSpan={8} className="px-6 py-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h4 className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                                    🔋 סוללות — {drone.model} ({drone.tailNumber})
+                                  </h4>
+                                  <button
+                                    onClick={() => setBatteryModal({ battery: null, tailNumber: drone.tailNumber })}
+                                    className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-700/40 px-2.5 py-1.5 rounded-lg transition-all"
+                                  >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                    הוסף סוללה
+                                  </button>
+                                </div>
+                                {batteries.length === 0 ? (
+                                  <p className="text-xs text-slate-500 py-2">אין סוללות רשומות לרחפן זה</p>
+                                ) : (
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="text-right text-slate-500">
+                                        <th className="pb-2 font-medium">שם סט</th>
+                                        <th className="pb-2 font-medium">מחזור סוללה 1</th>
+                                        <th className="pb-2 font-medium">מחזור סוללה 2</th>
+                                        <th className="pb-2 font-medium">תאריך בדיקה</th>
+                                        <th className="pb-2 font-medium"></th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700/30">
+                                      {batteries.map(bat => (
+                                        <tr key={bat.id} className="hover:bg-slate-800/50">
+                                          <td className="py-2 font-medium text-white">{bat.setName}</td>
+                                          <td className="py-2 text-slate-300">{bat.cycle1 ?? '—'}</td>
+                                          <td className="py-2 text-slate-300">{bat.cycle2 ?? '—'}</td>
+                                          <td className="py-2 text-slate-400">{bat.inspectionDate || '—'}</td>
+                                          <td className="py-2">
+                                            <div className="flex gap-1.5 justify-end">
+                                              <button
+                                                onClick={() => setBatteryModal({ battery: bat, tailNumber: drone.tailNumber })}
+                                                className="text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-600 px-2 py-1 rounded transition-all"
+                                              >
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                              </button>
+                                              <button
+                                                onClick={() => setConfirmBatteryId(bat.id)}
+                                                className="text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 px-2 py-1 rounded transition-all"
+                                              >
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       )
                     })}
                   </tbody>
