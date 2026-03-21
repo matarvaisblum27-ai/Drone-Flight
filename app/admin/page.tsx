@@ -462,13 +462,12 @@ function DroneEditModal({ drone, onSave, onCancel }: {
 function BatteryModal({ battery, tailNumber, onSave, onCancel }: {
   battery: DroneBattery | null
   tailNumber: string
-  onSave: (b: Partial<DroneBattery> & { tailNumber: string }) => void
+  onSave: (b: Partial<DroneBattery> & { droneTailNumber: string }) => void
   onCancel: () => void
 }) {
   const [form, setForm] = useState({
-    setName:        battery?.setName ?? '',
-    cycle1:         battery?.cycle1 != null ? String(battery.cycle1) : '',
-    cycle2:         battery?.cycle2 != null ? String(battery.cycle2) : '',
+    batteryName:    battery?.batteryName ?? '',
+    chargeCycle:    battery?.chargeCycle ?? '',
     inspectionDate: battery?.inspectionDate ?? '',
   })
   const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -479,18 +478,12 @@ function BatteryModal({ battery, tailNumber, onSave, onCancel }: {
         <h3 className="text-base font-semibold text-white mb-5">{battery ? 'עריכת סוללה' : 'הוספת סוללה'}</h3>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">שם סט</label>
-            <input value={form.setName} onChange={e => setForm(p => ({ ...p, setName: e.target.value }))} placeholder="למשל: סט 1" className={cls} />
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">שם סוללה</label>
+            <input value={form.batteryName} onChange={e => setForm(p => ({ ...p, batteryName: e.target.value }))} placeholder="למשל: סט 1" className={cls} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">מחזור (סוללה 1)</label>
-              <input value={form.cycle1} onChange={e => setForm(p => ({ ...p, cycle1: e.target.value }))} type="number" placeholder="287" className={cls} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">מחזור (סוללה 2)</label>
-              <input value={form.cycle2} onChange={e => setForm(p => ({ ...p, cycle2: e.target.value }))} type="number" placeholder="282" className={cls} />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">מחזור (סוללה 1 - סוללה 2)</label>
+            <input value={form.chargeCycle} onChange={e => setForm(p => ({ ...p, chargeCycle: e.target.value }))} placeholder="287-282" className={cls} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">תאריך בדיקה</label>
@@ -501,8 +494,8 @@ function BatteryModal({ battery, tailNumber, onSave, onCancel }: {
           <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">ביטול</button>
           <button
             onClick={() => {
-              if (!form.setName.trim()) { alert('יש להזין שם סט'); return }
-              onSave({ id: battery?.id, tailNumber, setName: form.setName.trim(), cycle1: form.cycle1 ? Number(form.cycle1) : null, cycle2: form.cycle2 ? Number(form.cycle2) : null, inspectionDate: form.inspectionDate })
+              if (!form.batteryName.trim()) { alert('יש להזין שם סוללה'); return }
+              onSave({ id: battery?.id, droneTailNumber: tailNumber, batteryName: form.batteryName.trim(), chargeCycle: form.chargeCycle, inspectionDate: form.inspectionDate })
             }}
             className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
             {battery ? 'שמור' : 'הוסף'}
@@ -689,7 +682,7 @@ export default function AdminDashboard() {
     fetchDroneData()
   }
 
-  const handleSaveBattery = async (b: Partial<DroneBattery> & { tailNumber: string }) => {
+  const handleSaveBattery = async (b: Partial<DroneBattery> & { droneTailNumber: string }) => {
     const method = b.id ? 'PUT' : 'POST'
     const res = await fetch('/api/drone-batteries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
     if (!res.ok) { alert(b.id ? 'שגיאה בעדכון סוללה' : 'שגיאה בהוספת סוללה'); return }
@@ -1296,11 +1289,11 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     </tr>
                   </thead>
                   <tbody>
-                    {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: null, serialNumber: '', extraRegistration: null }))).map(drone => {
+                    {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))).map(drone => {
                       const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
                       const totalMins = dFlights.reduce((a: number, f: Flight) => a + f.duration, 0)
                       const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
-                      const batteries = droneBatteries.filter(b => b.tailNumber === drone.tailNumber)
+                      const batteries = droneBatteries.filter(b => b.droneTailNumber === drone.tailNumber)
                       const isExpanded = expandedDrone === drone.tailNumber
                       return (
                         <>
@@ -1374,9 +1367,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                   <table className="w-full text-xs">
                                     <thead>
                                       <tr className="text-right text-slate-500">
-                                        <th className="pb-2 font-medium">שם סט</th>
-                                        <th className="pb-2 font-medium">מחזור סוללה 1</th>
-                                        <th className="pb-2 font-medium">מחזור סוללה 2</th>
+                                        <th className="pb-2 font-medium">שם סוללה</th>
+                                        <th className="pb-2 font-medium">מחזור</th>
                                         <th className="pb-2 font-medium">תאריך בדיקה</th>
                                         <th className="pb-2 font-medium"></th>
                                       </tr>
@@ -1384,9 +1376,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                     <tbody className="divide-y divide-slate-700/30">
                                       {batteries.map(bat => (
                                         <tr key={bat.id} className="hover:bg-slate-800/50">
-                                          <td className="py-2 font-medium text-white">{bat.setName}</td>
-                                          <td className="py-2 text-slate-300">{bat.cycle1 ?? '—'}</td>
-                                          <td className="py-2 text-slate-300">{bat.cycle2 ?? '—'}</td>
+                                          <td className="py-2 font-medium text-white">{bat.batteryName}</td>
+                                          <td className="py-2 text-slate-300 font-mono">{bat.chargeCycle || '—'}</td>
                                           <td className="py-2 text-slate-400">{bat.inspectionDate || '—'}</td>
                                           <td className="py-2">
                                             <div className="flex gap-1.5 justify-end">

@@ -47,9 +47,8 @@ export interface DroneInfo {
 
 export interface DroneBattery {
   id: string
-  tailNumber: string
-  setName: string
-  cycle1: number | null
-  cycle2: number | null
+  droneTailNumber: string
+  batteryName: string
+  chargeCycle: string      // e.g. "287-282"
   inspectionDate: string
 }
