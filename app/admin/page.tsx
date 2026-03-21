@@ -6,6 +6,20 @@ import { DRONES, droneLabel } from '@/lib/drones'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 const BATTERY_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
+const GAS_TAIL_NUMBERS = ['4x-xpg', '4x-ujs']
+const MATRIX_MODELS = ['מאביק 2', 'מאביק 3', 'מאטריס 30', 'מאטריס 300', 'מאטריס 600', 'G3', 'אווטה']
+function toMatrixModel(model: string): string | null {
+  if (model === 'מאביק 2') return 'מאביק 2'
+  if (model.startsWith('מאביק 3')) return 'מאביק 3'
+  if (model === 'מאטריס 30') return 'מאטריס 30'
+  if (model === 'מאטריס 300') return 'מאטריס 300'
+  if (model === 'מאטריס 600') return 'מאטריס 600'
+  if (model === 'G3') return 'G3'
+  if (model.startsWith('אווטה')) return 'אווטה'
+  return null
+}
+const TAIL_TO_MATRIX_MODEL: Record<string, string> = {}
+DRONES.forEach(d => { const m = toMatrixModel(d.model); if (m) TAIL_TO_MATRIX_MODEL[d.tailNumber] = m })
 
 function fmtHours(minutes: number) {
   const h = Math.floor(minutes / 60)
@@ -525,7 +539,7 @@ export default function AdminDashboard() {
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
-  const [summaryMode, setSummaryMode] = useState<'monthly' | 'yearly'>('monthly')
+  const [summaryMode, setSummaryMode] = useState<'monthly' | 'yearly'>('monthly') // kept for potential future use
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
   const [editFlight, setEditFlight] = useState<Flight | null>(null)
@@ -590,13 +604,22 @@ export default function AdminDashboard() {
   }).sort((a, b) => b.totalMinutes - a.totalMinutes)
   const maxMinutes = pilotStats[0]?.totalMinutes ?? 1
 
-  const summaryMap: Record<string, number> = {}
+  // Drone total minutes per tail
+  const droneTotalMins: Record<string, number> = {}
+  db.flights.forEach(f => { droneTotalMins[f.tailNumber] = (droneTotalMins[f.tailNumber] || 0) + f.duration })
+
+  // Pilot training matrix
+  const pilotEverFlew: Record<string, Set<string>> = {}
+  const pilotMonthlyFlew: Record<string, Set<string>> = {}
+  db.pilots.forEach(p => { pilotEverFlew[p.id] = new Set(); pilotMonthlyFlew[p.id] = new Set() })
   db.flights.forEach(f => {
-    const key = summaryMode === 'monthly' ? f.date.slice(0, 7) : f.date.slice(0, 4)
-    summaryMap[key] = (summaryMap[key] || 0) + f.duration
+    const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+    if (!model) return
+    if (pilotEverFlew[f.pilotId]) pilotEverFlew[f.pilotId].add(model)
+    if (f.date.startsWith(thisMonth) && pilotMonthlyFlew[f.pilotId]) pilotMonthlyFlew[f.pilotId].add(model)
   })
-  const summaryEntries = Object.entries(summaryMap).sort((a, b) => b[0].localeCompare(a[0]))
-  const maxSummaryMins = Math.max(...summaryEntries.map(([, v]) => v), 1)
+
+  void summaryMode // suppress unused warning
 
   const handleAddFlight = async () => {
     setAddError(''); setAddSuccess('')
@@ -873,87 +896,113 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-          <div className="flex gap-2 justify-end flex-wrap">
-            <button
-              onClick={handleMarkGasDrops}
-              disabled={gasDropMigrating}
-              className="flex items-center gap-2 bg-orange-700/80 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-orange-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
-              סמן הטלות גז היסטוריות
-            </button>
-            <button
-              onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
-              className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              ייצוא כללי לאקסל ({db.flights.length} טיסות)
-            </button>
-          </div>
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
-              <h2 className="text-base font-semibold text-white mb-5 flex items-center gap-2">
-                <span className="text-blue-400">🔋</span> מצב סוללות
-              </h2>
-              <div className="grid grid-cols-3 gap-3">
-                {BATTERY_LABELS.map(bat => {
-                  const pct = db.batteries[bat] ?? 0
-                  return (
-                    <div key={bat} className="bg-slate-700/40 rounded-xl p-4 text-center border border-slate-600/30">
-                      <p className="text-xs text-slate-400 mb-2">סוללה {bat}</p>
-                      <div className="relative w-12 h-12 mx-auto mb-2">
-                        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                          <circle cx="18" cy="18" r="15.9" fill="none" stroke="#334155" strokeWidth="3" />
-                          <circle cx="18" cy="18" r="15.9" fill="none"
-                            stroke={pct >= 60 ? '#22c55e' : pct >= 30 ? '#eab308' : '#ef4444'}
-                            strokeWidth="3" strokeDasharray={`${pct} ${100 - pct}`}
-                            strokeDashoffset="25" strokeLinecap="round" />
-                        </svg>
-                        <span className={`absolute inset-0 flex items-center justify-center text-xs font-bold ${batteryColor(pct)}`}>{pct}%</span>
-                      </div>
-                      <div className={`text-xs font-medium ${batteryColor(pct)}`}>
-                        {pct >= 60 ? 'תקין' : pct >= 30 ? 'בינוני' : 'נמוך'}
-                      </div>
-                    </div>
-                  )
-                })}
+            <div className="flex gap-2 justify-end flex-wrap">
+              <button
+                onClick={handleMarkGasDrops}
+                disabled={gasDropMigrating}
+                className="flex items-center gap-2 bg-orange-700/80 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-orange-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
+                סמן הטלות גז היסטוריות
+              </button>
+              <button
+                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
+                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                ייצוא כללי לאקסל ({db.flights.length} טיסות)
+              </button>
+            </div>
+
+            {/* Section 1: Drone Summary */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-slate-700/50">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <span>🚁</span> סיכום רחפנים
+                </h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table dir="rtl" className="w-full">
+                  <thead>
+                    <tr className="bg-slate-700/30">
+                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">שם רחפן</th>
+                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">מס׳ זנב</th>
+                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">סה&quot;כ שעות טיסה</th>
+                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">הטלה אחרונה</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/30">
+                    {DRONES.map(drone => {
+                      const totalMins = droneTotalMins[drone.tailNumber] ?? 0
+                      const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
+                      const lastGasDrop = isGas
+                        ? gasDrops.filter(g => g.tailNumber === drone.tailNumber).sort((a, b) => b.date.localeCompare(a.date))[0]
+                        : null
+                      return (
+                        <tr key={drone.tailNumber} className="hover:bg-slate-700/20 transition-colors">
+                          <td className="px-5 py-3 text-sm font-medium text-white">{drone.model}</td>
+                          <td className="px-5 py-3 text-sm font-mono text-slate-300">{drone.tailNumber}</td>
+                          <td className="px-5 py-3 text-sm font-semibold text-blue-400">{totalMins ? fmtHours(totalMins) : '—'}</td>
+                          <td className="px-5 py-3 text-sm">
+                            {isGas
+                              ? lastGasDrop
+                                ? <span className="text-green-400">{new Date(lastGasDrop.date).toLocaleDateString('he-IL')}</span>
+                                : <span className="text-slate-500">—</span>
+                              : <span className="text-slate-600 text-xs">—</span>
+                            }
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
-              <div className="flex items-center justify-between mb-5">
+            {/* Section 2: Pilot Training Matrix */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                  <span className="text-blue-400">📈</span> סיכום טיסות
+                  <span>🎓</span> סיכום אימוני טייסים
                 </h2>
-                <div className="flex gap-1 bg-slate-700/50 rounded-lg p-0.5">
-                  {(['monthly', 'yearly'] as const).map(m => (
-                    <button key={m} onClick={() => setSummaryMode(m)}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all
-                        ${summaryMode === m ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-                      {m === 'monthly' ? 'חודשי' : 'שנתי'}
-                    </button>
-                  ))}
-                </div>
               </div>
-              <div className="space-y-3">
-                {summaryEntries.slice(0, 8).map(([key, mins]) => (
-                  <div key={key} className="flex items-center gap-3">
-                    <span className="text-xs text-slate-400 w-16 text-right flex-shrink-0">
-                      {summaryMode === 'monthly'
-                        ? new Date(key + '-01').toLocaleDateString('he-IL', { month: 'short', year: '2-digit' })
-                        : key}
-                    </span>
-                    <div className="flex-1 bg-slate-700/50 rounded-full h-5 overflow-hidden">
-                      <div className="h-full bg-gradient-to-l from-blue-600 to-blue-400 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
-                        style={{ width: `${Math.max((mins / maxSummaryMins) * 100, 4)}%` }}>
-                        <span className="text-xs text-white font-medium whitespace-nowrap">{fmtHours(mins)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table dir="rtl" className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-700/30">
+                      <th rowSpan={2} className="px-5 py-3 text-xs font-medium text-slate-400 text-right align-bottom border-b border-slate-700/50">טייס</th>
+                      <th colSpan={MATRIX_MODELS.length} className="px-3 py-2 text-xs font-medium text-slate-300 text-center border-b border-l border-slate-700/50">כשירות כללית</th>
+                      <th colSpan={MATRIX_MODELS.length} className="px-3 py-2 text-xs font-medium text-amber-400/90 text-center border-b border-slate-700/50">אימון חודשי</th>
+                    </tr>
+                    <tr className="bg-slate-700/20">
+                      {MATRIX_MODELS.map(m => (
+                        <th key={`eh-${m}`} className="px-2 py-2 text-xs text-slate-400 font-normal text-center min-w-[4.5rem]">{m}</th>
+                      ))}
+                      {MATRIX_MODELS.map((m, idx) => (
+                        <th key={`mh-${m}`} className={`px-2 py-2 text-xs text-amber-400/70 font-normal text-center min-w-[4.5rem] ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>{m}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/30">
+                    {db.pilots.map(pilot => (
+                      <tr key={pilot.id} className="hover:bg-slate-700/20 transition-colors">
+                        <td className="px-5 py-3 font-medium text-white whitespace-nowrap">{pilot.name}</td>
+                        {MATRIX_MODELS.map(model => (
+                          <td key={`e-${model}`} className="text-center py-3">
+                            <span className={`inline-block w-3 h-3 rounded-full ${pilotEverFlew[pilot.id]?.has(model) ? 'bg-green-500' : 'bg-red-500/70'}`} />
+                          </td>
+                        ))}
+                        {MATRIX_MODELS.map((model, idx) => (
+                          <td key={`m-${model}`} className={`text-center py-3 ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>
+                            <span className={`inline-block w-3 h-3 rounded-full ${pilotMonthlyFlew[pilot.id]?.has(model) ? 'bg-green-500' : 'bg-red-500/70'}`} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-          </div>
           </div>
         )}
 
