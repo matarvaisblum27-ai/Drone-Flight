@@ -6,6 +6,8 @@ import { DRONES, droneLabel } from '@/lib/drones'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 const GAS_TAIL_NUMBERS = ['4x-xpg', '4x-ujs']
+const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
+const HEBREW_MONTH_NAMES = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const MATRIX_MODELS = ['מאביק 2', 'מאביק 3', 'מאטריס 30', 'מאטריס 300', 'מאטריס 600', 'G3', 'אווטה']
 function toMatrixModel(model: string): string | null {
   if (model === 'מאביק 2') return 'מאביק 2'
@@ -83,7 +85,8 @@ function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel
     const pilot1 = pilotMap.get(uniquePilotIds[0])
     const pilot2 = uniquePilotIds[1] ? pilotMap.get(uniquePilotIds[1]) : undefined
     const observer = mission.flights.find(f => f.observer)?.observer ?? ''
-    rows.push([headerLabel(mission), date, mission.missionName, '', pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer])
+    const battalion = mission.flights.find(f => f.battalion)?.battalion ?? ''
+    rows.push([headerLabel(mission), date, mission.missionName, battalion, pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer])
     rows.push(['', 'שעת התחלה', 'שעת סיום', 'שם מטיס', 'רישוי מטיס', 'סוללה', "סה\"כ דק' טיסה"])
     for (let i = 0; i < MAX_FLIGHTS_PER_MISSION; i++) {
       const f = mission.flights[i]
@@ -215,7 +218,7 @@ function ConfirmDialog({ message, onConfirm, onCancel }: {
 type EditForm = {
   pilotId: string; date: string; missionName: string; tailNumber: string
   battery: string; startTime: string; endTime: string
-  observer: string; gasDropped: boolean; eventNumber: string
+  observer: string; gasDropped: boolean; eventNumber: string; battalion: string
 }
 
 function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
@@ -237,6 +240,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
     observer:    flight.observer    ?? '',
     gasDropped:  flight.gasDropped  ?? false,
     eventNumber: flight.eventNumber ?? '',
+    battalion:   flight.battalion   ?? '',
   })
   const [error, setError] = useState('')
 
@@ -321,11 +325,18 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
             <label className={labelCls}>שעת נחיתה</label>
             <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className={labelCls}>תצפיתן (אופציונלי)</label>
             <input type="text" value={form.observer}
               onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
               placeholder="שם התצפיתן..." className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>גדוד (אופציונלי)</label>
+            <select value={form.battalion} onChange={e => setForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
+              <option value="">— בחר גדוד —</option>
+              {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
           </div>
           {(form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg') && (
             <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
@@ -571,11 +582,12 @@ export default function AdminDashboard() {
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
-    observer: '', gasDropped: false, eventNumber: '',
+    observer: '', gasDropped: false, eventNumber: '', battalion: '',
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
   const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
+  const [expandedDroneCard, setExpandedDroneCard] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -629,10 +641,40 @@ export default function AdminDashboard() {
 
   // Stats
   const now = new Date()
+  const thisYear = String(now.getFullYear())
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const totalMinutes = db.flights.reduce((a, f) => a + f.duration, 0)
   const missionsThisMonth = db.flights.filter(f => f.date.startsWith(thisMonth)).length
-  const avgDuration = db.flights.length ? Math.round(totalMinutes / db.flights.length) : 0
+  const missionsThisYear  = db.flights.filter(f => f.date.startsWith(thisYear)).length
+
+  // Battalion breakdown (all-time)
+  const battalionCounts: Record<string, number> = {}
+  BATTALIONS.forEach(b => { battalionCounts[b] = 0 })
+  db.flights.forEach(f => { if (f.battalion && battalionCounts[f.battalion] !== undefined) battalionCounts[f.battalion]++ })
+  const maxBattalionCount = Math.max(...Object.values(battalionCounts), 1)
+
+  // Drone minutes YTD + monthly breakdown
+  const droneYTDMins: Record<string, number> = {}
+  const droneMonthlyMins: Record<string, Record<string, number>> = {}
+  const droneMonthlyPilots: Record<string, Record<string, Set<string>>> = {}
+  db.flights.forEach(f => {
+    if (!f.date.startsWith(thisYear)) return
+    droneYTDMins[f.tailNumber] = (droneYTDMins[f.tailNumber] || 0) + f.duration
+    const month = f.date.slice(0, 7)
+    if (!droneMonthlyMins[f.tailNumber]) droneMonthlyMins[f.tailNumber] = {}
+    if (!droneMonthlyPilots[f.tailNumber]) droneMonthlyPilots[f.tailNumber] = {}
+    droneMonthlyMins[f.tailNumber][month] = (droneMonthlyMins[f.tailNumber][month] || 0) + f.duration
+    if (!droneMonthlyPilots[f.tailNumber][month]) droneMonthlyPilots[f.tailNumber][month] = new Set()
+    droneMonthlyPilots[f.tailNumber][month].add(f.pilotName)
+  })
+
+  // Pilot month + YTD minutes
+  const pilotMonthMins: Record<string, number> = {}
+  const pilotYTDMins: Record<string, number> = {}
+  db.flights.forEach(f => {
+    if (f.date.startsWith(thisMonth)) pilotMonthMins[f.pilotId] = (pilotMonthMins[f.pilotId] || 0) + f.duration
+    if (f.date.startsWith(thisYear))  pilotYTDMins[f.pilotId]   = (pilotYTDMins[f.pilotId]   || 0) + f.duration
+  })
 
   const pilotStats: PilotStats[] = db.pilots.map(pilot => {
     const pFlights = db.flights.filter(f => f.pilotId === pilot.id)
@@ -696,6 +738,7 @@ export default function AdminDashboard() {
         missionName: addForm.missionName, tailNumber: addForm.tailNumber, battery: addForm.battery,
         startTime, endTime, duration,
         observer: addForm.observer, gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
+        battalion: addForm.battalion,
       }),
     })
     if (!res.ok) {
@@ -703,7 +746,7 @@ export default function AdminDashboard() {
       setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '' })
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '', battalion: '' })
     fetchDB()
   }
 
@@ -724,6 +767,7 @@ export default function AdminDashboard() {
         date: form.date, missionName: form.missionName, tailNumber: form.tailNumber,
         battery: form.battery, startTime: form.startTime, endTime: form.endTime, duration,
         observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber,
+        battalion: form.battalion,
       }),
     })
     setEditFlight(null)
@@ -951,7 +995,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             { label: 'סה"כ שעות טיסה', value: fmtHours(totalMinutes), icon: '🕐' },
             { label: 'טייסים פעילים', value: db.pilots.length, icon: '👨‍✈️' },
             { label: 'משימות החודש', value: missionsThisMonth, icon: '📋' },
-            { label: 'ממוצע לטיסה', value: `${avgDuration}ד'`, icon: '⏱️' },
+            { label: 'משימות מתחילת השנה', value: missionsThisYear, icon: '📅' },
           ].map(({ label, value, icon }) => (
             <div key={label} className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
               <div className="flex items-start justify-between mb-3">
@@ -961,6 +1005,29 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <p className="text-2xl font-bold text-white">{value}</p>
             </div>
           ))}
+        </div>
+
+        {/* Battalion breakdown card */}
+        <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
+          <p className="text-xs text-slate-400 mb-3">התפלגות משימות לפי גדוד</p>
+          <div className="space-y-2" dir="rtl">
+            {BATTALIONS.map(bn => {
+              const count = battalionCounts[bn] ?? 0
+              const pct = maxBattalionCount > 0 ? (count / maxBattalionCount) * 100 : 0
+              return (
+                <div key={bn} className="flex items-center gap-3">
+                  <span className="text-xs text-slate-300 w-28 shrink-0 text-right">{bn}</span>
+                  <div className="flex-1 h-4 bg-slate-700/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                      style={{ width: `${Math.max(pct, count > 0 ? 4 : 0)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-semibold text-blue-400 w-6 text-left shrink-0">{count}</span>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* Tabs */}
@@ -1011,11 +1078,12 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 </h2>
               </div>
 
-              {/* Mobile: cards */}
-              <div className="sm:hidden p-4 grid grid-cols-2 gap-3" dir="rtl">
+              {/* Mobile + desktop: unified clickable cards */}
+              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" dir="rtl">
                 {DRONES.map(drone => {
-                  const totalMins = droneTotalMins[drone.tailNumber] ?? 0
-                  const pct = totalMins / maxDroneMins
+                  const ytdMins = droneYTDMins[drone.tailNumber] ?? 0
+                  const maxYTD = Math.max(...DRONES.map(d => droneYTDMins[d.tailNumber] ?? 0), 1)
+                  const pct = ytdMins / maxYTD
                   const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
                   const lastGasDrop = isGas
                     ? gasDrops.filter(g => g.tailNumber === drone.tailNumber).sort((a, b) => b.date.localeCompare(a.date))[0]
@@ -1023,66 +1091,70 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   const barColor = pct > 0.66 ? 'from-cyan-500 to-blue-400' : pct > 0.33 ? 'from-blue-500 to-blue-600' : pct > 0 ? 'from-blue-700 to-slate-500' : 'from-slate-700 to-slate-600'
                   const hoursColor = pct > 0.66 ? 'text-cyan-400' : pct > 0.33 ? 'text-blue-400' : pct > 0 ? 'text-blue-500' : 'text-slate-500'
                   const borderColor = pct > 0.66 ? 'border-cyan-500/30' : pct > 0.33 ? 'border-blue-500/30' : pct > 0 ? 'border-blue-800/30' : 'border-slate-600/30'
+                  const isOpen = expandedDroneCard === drone.tailNumber
+                  const monthlyData = Object.entries(droneMonthlyMins[drone.tailNumber] ?? {}).sort()
                   return (
-                    <div key={drone.tailNumber} className={`bg-slate-700/40 border ${borderColor} rounded-xl p-4 transition-all`}>
-                      <p className="text-xs font-semibold text-white mb-0.5 leading-tight">{drone.model}</p>
-                      <p className="text-[10px] font-mono text-slate-500 mb-3">{drone.tailNumber}</p>
-                      <div className="h-1.5 bg-slate-600/50 rounded-full overflow-hidden mb-2">
-                        <div
-                          className={`h-full bg-gradient-to-l ${barColor} rounded-full transition-all duration-700`}
-                          style={{ width: `${totalMins > 0 ? Math.max(pct * 100, 5) : 0}%` }}
-                        />
-                      </div>
-                      <p className={`text-base font-bold ${hoursColor}`}>{totalMins ? fmtHours(totalMins) : '—'}</p>
-                      {isGas && (
-                        <div className="mt-2 pt-2 border-t border-slate-600/40">
-                          <p className="text-[10px] text-slate-400">הטלה אחרונה</p>
-                          <p className={`text-xs font-semibold ${lastGasDrop ? 'text-green-400' : 'text-slate-500'}`}>
-                            {lastGasDrop ? new Date(lastGasDrop.date).toLocaleDateString('he-IL') : '—'}
-                          </p>
+                    <div key={drone.tailNumber} className="col-span-1">
+                      <button
+                        onClick={() => setExpandedDroneCard(isOpen ? null : drone.tailNumber)}
+                        className={`w-full text-right bg-slate-700/40 border ${isOpen ? 'border-blue-500/50 bg-slate-700/60' : borderColor} rounded-xl p-4 transition-all active:scale-95`}
+                      >
+                        <p className="text-xs font-semibold text-white mb-0.5 leading-tight">{drone.model}</p>
+                        <p className="text-[10px] font-mono text-slate-500 mb-3">{drone.tailNumber}</p>
+                        <div className="h-1.5 bg-slate-600/50 rounded-full overflow-hidden mb-2">
+                          <div
+                            className={`h-full bg-gradient-to-l ${barColor} rounded-full transition-all duration-700`}
+                            style={{ width: `${ytdMins > 0 ? Math.max(pct * 100, 5) : 0}%` }}
+                          />
                         </div>
-                      )}
+                        <p className="text-[10px] text-slate-500 mb-0.5">מתחילת השנה</p>
+                        <p className={`text-base font-bold ${hoursColor}`}>{ytdMins ? fmtHours(ytdMins) : '—'}</p>
+                        {isGas && (
+                          <div className="mt-2 pt-2 border-t border-slate-600/40">
+                            <p className="text-[10px] text-slate-400">הטלה אחרונה</p>
+                            <p className={`text-xs font-semibold ${lastGasDrop ? 'text-green-400' : 'text-slate-500'}`}>
+                              {lastGasDrop ? new Date(lastGasDrop.date).toLocaleDateString('he-IL') : '—'}
+                            </p>
+                          </div>
+                        )}
+                      </button>
+                      {/* Expandable monthly breakdown */}
+                      <div
+                        className="overflow-hidden transition-all duration-300 ease-in-out"
+                        style={{ maxHeight: isOpen ? '600px' : '0px', opacity: isOpen ? 1 : 0 }}
+                      >
+                        <div className="mt-2 bg-slate-900/60 border border-slate-700/40 rounded-xl p-3" dir="rtl">
+                          <p className="text-[10px] font-semibold text-slate-400 mb-2">פירוט חודשי — {thisYear}</p>
+                          {monthlyData.length === 0 ? (
+                            <p className="text-xs text-slate-600">אין טיסות השנה</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {monthlyData.map(([month, mins]) => {
+                                const monthIdx = parseInt(month.slice(5, 7)) - 1
+                                const pilots = Array.from(droneMonthlyPilots[drone.tailNumber]?.[month] ?? [])
+                                return (
+                                  <div key={month}>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-medium text-slate-400">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                                      <span className="text-[10px] font-bold text-blue-400">{fmtHours(mins)}</span>
+                                    </div>
+                                    <p className="text-[9px] text-slate-600 mt-0.5">{pilots.join(', ')}</p>
+                                  </div>
+                                )
+                              })}
+                              <div className="border-t border-slate-700/40 pt-2 flex items-center justify-between">
+                                <span className="text-[10px] font-semibold text-slate-300">סה&quot;כ שנה</span>
+                                <span className="text-[10px] font-bold text-cyan-400">{fmtHours(ytdMins)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
               </div>
 
-              {/* Desktop: table */}
-              <div className="hidden sm:block overflow-x-auto">
-                <table dir="rtl" className="w-full">
-                  <thead>
-                    <tr className="bg-slate-700/30">
-                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">שם רחפן</th>
-                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">מס׳ זנב</th>
-                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">סה&quot;כ שעות טיסה</th>
-                      <th className="px-5 py-3 text-xs font-medium text-slate-400 text-right">הטלה אחרונה</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/30">
-                    {DRONES.map(drone => {
-                      const totalMins = droneTotalMins[drone.tailNumber] ?? 0
-                      const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
-                      const lastGasDrop = isGas
-                        ? gasDrops.filter(g => g.tailNumber === drone.tailNumber).sort((a, b) => b.date.localeCompare(a.date))[0]
-                        : null
-                      return (
-                        <tr key={drone.tailNumber} className="hover:bg-slate-700/20 transition-colors">
-                          <td className="px-5 py-3 text-sm font-medium text-white">{drone.model}</td>
-                          <td className="px-5 py-3 text-sm font-mono text-slate-300">{drone.tailNumber}</td>
-                          <td className="px-5 py-3 text-sm font-semibold text-blue-400">{totalMins ? fmtHours(totalMins) : '—'}</td>
-                          <td className="px-5 py-3 text-sm">
-                            {isGas
-                              ? lastGasDrop
-                                ? <span className="text-green-400">{new Date(lastGasDrop.date).toLocaleDateString('he-IL')}</span>
-                                : <span className="text-slate-500">—</span>
-                              : <span className="text-slate-600 text-xs">—</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
             </div>
 
             {/* ── Section 2: Pilot Training Matrix ───────────────────────── */}
@@ -1402,11 +1474,18 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <label className={labelCls}>שעת נחיתה</label>
                 <input type="time" value={addForm.endTime} onChange={e => setAddForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
               </div>
-              <div className="sm:col-span-2">
+              <div>
                 <label className={labelCls}>תצפיתן (אופציונלי)</label>
                 <input type="text" value={addForm.observer}
                   onChange={e => setAddForm(f => ({ ...f, observer: e.target.value }))}
                   placeholder="שם התצפיתן..." className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>גדוד (אופציונלי)</label>
+                <select value={addForm.battalion} onChange={e => setAddForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
+                  <option value="">— בחר גדוד —</option>
+                  {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
               </div>
               {(addForm.tailNumber === '4x-ujs' || addForm.tailNumber === '4x-xpg') && (
                 <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
@@ -1459,7 +1538,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/30 text-right">
-                    {['תאריך', 'טייס', 'משימה', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
+                    {['תאריך', 'טייס', 'משימה', 'גדוד', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
                     ))}
                   </tr>
@@ -1473,6 +1552,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       </td>
                       <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
                       <td className="px-4 py-3 text-slate-300">{f.missionName}</td>
+                      <td className="px-4 py-3 text-xs">{f.battalion ? <span className="bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 px-2 py-0.5 rounded-md whitespace-nowrap">{f.battalion}</span> : <span className="text-slate-600">—</span>}</td>
                       <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
                       <td className="px-4 py-3 text-slate-400 font-mono text-xs">
                         {droneLabel(f.tailNumber)}
@@ -1554,7 +1634,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['#', 'שם', 'רישיון', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
+                      {['#', 'שם', 'רישיון', 'טיסות', 'סה"כ שעות', 'שעות החודש', 'שעות מתחילת השנה', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
                         <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -1584,6 +1664,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           <td className="px-5 py-4 text-slate-400 font-mono text-xs">{p.license}</td>
                           <td className="px-5 py-4 text-slate-300">{pFlights.length}</td>
                           <td className="px-5 py-4 text-blue-400 font-medium">{fmtHours(totalMins)}</td>
+                          <td className="px-5 py-4 text-indigo-400 font-medium">{pilotMonthMins[p.id] ? fmtHours(pilotMonthMins[p.id]) : '—'}</td>
+                          <td className="px-5 py-4 text-cyan-400 font-medium">{pilotYTDMins[p.id] ? fmtHours(pilotYTDMins[p.id]) : '—'}</td>
                           <td className="px-5 py-4 text-slate-400">
                             {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                           </td>

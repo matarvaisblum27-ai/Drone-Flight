@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation'
 import { FlightDB, DroneBattery, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 
+const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
+
 function ConfirmDialog({ message, onConfirm, onCancel }: {
   message: string; onConfirm: () => void; onCancel: () => void
 }) {
@@ -62,7 +64,7 @@ export default function PilotDashboard() {
   const [form, setForm] = useState({
     date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
-    observer: '', gasDropped: false, eventNumber: '',
+    observer: '', gasDropped: false, eventNumber: '', battalion: '',
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -124,7 +126,7 @@ export default function PilotDashboard() {
         pilotId: pilot.id, pilotName: pilot.name, date: form.date,
         missionName: form.missionName, tailNumber: form.tailNumber,
         battery: form.battery, startTime, endTime, duration,
-        observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber,
+        observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber, battalion: form.battalion,
       }),
     })
     if (!res.ok) {
@@ -132,7 +134,7 @@ export default function PilotDashboard() {
       setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד לעדכון בסיס הנתונים' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '' })
+    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '', battalion: '' })
     fetchDB()
     setTimeout(() => setActiveTab('history'), 1200)
   }
@@ -342,11 +344,18 @@ export default function PilotDashboard() {
                   onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
                   className={inputCls} />
               </div>
-              <div className="sm:col-span-2">
+              <div>
                 <label className={labelCls}>תצפיתן (אופציונלי)</label>
                 <input type="text" value={form.observer}
                   onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
                   placeholder="שם התצפיתן..." className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>גדוד (אופציונלי)</label>
+                <select value={form.battalion} onChange={e => setForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
+                  <option value="">— בחר גדוד —</option>
+                  {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
               </div>
               {(form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg') && (
                 <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">

@@ -18,6 +18,7 @@ export interface Flight {
   observer: string
   gasDropped: boolean
   eventNumber: string // free-text event number for gas drops (stored in gas_drop_time column)
+  battalion: string   // גדוד
 }
 
 export interface FlightDB {

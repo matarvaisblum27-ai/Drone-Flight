@@ -20,6 +20,7 @@ function rowToFlight(row: any): Flight {
     observer:    row.observer      ?? '',
     gasDropped:  row.gas_dropped   ?? false,
     eventNumber: row.gas_drop_time ?? '',  // reuse existing column for event number
+    battalion:   row.battalion     ?? '',
   }
 }
 
@@ -87,6 +88,7 @@ export async function POST(req: NextRequest) {
     observer:      body.observer     ?? '',
     gas_dropped:   body.gasDropped   ?? false,
     gas_drop_time: body.eventNumber  || null,
+    battalion:     body.battalion    ?? '',
   }
 
   const { data, error } = await supabase.from('flights').insert(record).select().single()
@@ -130,6 +132,7 @@ export async function PUT(req: NextRequest) {
       ? (body.eventNumber || null)
       : (existing.gas_drop_time ?? null)
   }
+  updates.battalion = body.battalion !== undefined ? body.battalion : (existing.battalion ?? '')
 
   const { data, error } = await supabase
     .from('flights').update(updates).eq('id', body.id).select().single()
