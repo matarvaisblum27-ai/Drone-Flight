@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { GasDrop } from '@/lib/types'
+import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,9 @@ function rowToGasDrop(row: any): GasDrop {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const { data, error } = await supabase
     .from('gas_drops').select('*').order('date')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -24,6 +27,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const body = await req.json()
   const { pilotName, date, tailNumber, gasDropTime, notes } = body
   if (!pilotName || !date || !tailNumber)
@@ -39,6 +44,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })

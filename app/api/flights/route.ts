@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { Flight, FlightDB } from '@/lib/types'
+import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,10 @@ async function hasMigration(): Promise<boolean> {
   return !error
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
+
   const [pilotsRes, flightsRes, batteriesRes, migrated] = await Promise.all([
     supabase.from('pilots').select('*').order('name'),
     supabase.from('flights').select('*').order('date').order('start_time'),
@@ -57,6 +61,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
+
   const body = await req.json()
 
   if (!(await hasMigration())) {
@@ -100,6 +107,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
+
   const body = await req.json()
 
   const { data: existing, error: fetchErr } = await supabase
@@ -144,6 +154,9 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
+
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })

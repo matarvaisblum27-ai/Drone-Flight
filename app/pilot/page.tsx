@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, DroneBattery, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
+import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
@@ -129,6 +130,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function PilotDashboard() {
+  useInactivityLogout()
   const router = useRouter()
   const [userName, setUserName] = useState('')
   const [db, setDb] = useState<FlightDB | null>(null)

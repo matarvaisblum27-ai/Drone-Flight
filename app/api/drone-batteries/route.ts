@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { DroneBattery } from '@/lib/types'
+import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +26,9 @@ function rowToBattery(row: any): DroneBattery {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const { data, error } = await supabase
     .from('drone_batteries').select('*').order('drone_tail_number').order('battery_name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -41,6 +44,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const body = await req.json()
   const { droneTailNumber, batteryName, chargeCycle, inspectionDate } = body
   if (!droneTailNumber || !batteryName)
@@ -56,6 +61,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const body = await req.json()
   const { id, batteryName, chargeCycle, inspectionDate } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
@@ -70,6 +77,8 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })

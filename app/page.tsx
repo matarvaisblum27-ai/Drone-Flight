@@ -49,7 +49,13 @@ export default function LoginPage() {
       try { data = await res.json() } catch { /* non-JSON response */ }
       console.log('[login page] API response:', { status: res.status, isAdmin: data.isAdmin, isViewer: data.isViewer, ok: data.ok })
       if (!res.ok) {
-        setError(data.error === 'invalid_credentials' ? 'שם משתמש או סיסמה שגויים' : `שגיאת שרת (${res.status})`)
+        if (data.error === 'rate_limited') {
+          setError('יותר מדי ניסיונות — נסה שוב בעוד 15 דקות')
+        } else if (data.error === 'invalid_credentials') {
+          setError('שם משתמש או סיסמה שגויים')
+        } else {
+          setError(`שגיאת שרת (${res.status})`)
+        }
         return
       }
       const dest = (data.isAdmin || data.isViewer) ? '/admin' : '/pilot'

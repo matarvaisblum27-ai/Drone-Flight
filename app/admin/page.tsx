@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
+import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 const GAS_TAIL_NUMBERS = ['4x-xpg', '4x-ujs']
@@ -616,9 +617,10 @@ function BatteryModal({ battery, tailNumber, drones, onSave, onCancel }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
+  useInactivityLogout()
   const router = useRouter()
   const [db, setDb] = useState<FlightDB | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots' | 'batteries' | 'drones'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots' | 'batteries' | 'drones' | 'logs'>('overview')
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
@@ -643,6 +645,7 @@ export default function AdminDashboard() {
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
   const [currentUserName, setCurrentUserName] = useState<string>('')
+  const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
   // authChecked gates all data loading — nothing renders until DB permission is confirmed
   const [authChecked, setAuthChecked] = useState(false)
 
@@ -696,10 +699,16 @@ export default function AdminDashboard() {
     if (res.ok) setGasDrops(await res.json())
   }, [])
 
+  const fetchLoginLogs = useCallback(async () => {
+    const res = await fetch('/api/login-logs', { cache: 'no-store' })
+    if (res.ok) setLoginLogs(await res.json())
+  }, [])
+
   // Data loading is gated — only starts after DB confirms permission
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
   useEffect(() => { if (authChecked) fetchGasDrops() }, [authChecked, fetchGasDrops])
+  useEffect(() => { if (authChecked) fetchLoginLogs() }, [authChecked, fetchLoginLogs])
 
   if (!db) {
     return (
@@ -1116,14 +1125,15 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* Tabs */}
         <div className="flex gap-1 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1 overflow-x-auto">
           {([
-            { key: 'overview',   label: 'סקירה',          icon: '📊' },
-            { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆' },
-            { key: 'add',        label: 'הוספת טיסה',      icon: '➕' },
-            { key: 'history',    label: 'היסטוריה',        icon: '📜' },
-            { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️' },
-            { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋' },
-            { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁' },
-          ] as const).filter(({ key }) => canEdit || key !== 'add').map(({ key, label, icon }) => (
+            { key: 'overview',   label: 'סקירה',          icon: '📊', adminOnly: false },
+            { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', adminOnly: false },
+            { key: 'add',        label: 'הוספת טיסה',      icon: '➕', adminOnly: true  },
+            { key: 'history',    label: 'היסטוריה',        icon: '📜', adminOnly: false },
+            { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️', adminOnly: false },
+            { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋', adminOnly: false },
+            { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁', adminOnly: false },
+            { key: 'logs',       label: 'יומן כניסות',     icon: '🔐', adminOnly: false },
+          ] as const).filter(({ adminOnly }) => canEdit || !adminOnly).map(({ key, label, icon }) => (
             <button key={key} onClick={() => setActiveTab(key)}
               className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
                 ${activeTab === key ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}>
@@ -2063,6 +2073,56 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         </>
                       )
                     })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* LOGIN LOGS */}
+        {activeTab === 'logs' && (
+          <div className="space-y-5">
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-slate-700/50 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <span className="text-rose-400">🔐</span> יומן כניסות ({loginLogs.length})
+                </h2>
+                <button
+                  onClick={fetchLoginLogs}
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  רענן
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" dir="rtl">
+                  <thead>
+                    <tr className="bg-slate-700/30 text-right">
+                      {['תאריך ושעה', 'טייס', 'סטטוס', 'כתובת IP'].map(h => (
+                        <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/30">
+                    {loginLogs.length === 0 ? (
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">אין רשומות יומן</td></tr>
+                    ) : loginLogs.map(log => (
+                      <tr key={log.id} className="hover:bg-slate-700/20 transition-colors">
+                        <td className="px-4 py-3 text-slate-400 text-xs font-mono">
+                          {log.created_at ? new Date(log.created_at).toLocaleString('he-IL') : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-200 text-sm">{log.pilot_name}</td>
+                        <td className="px-4 py-3">
+                          {log.success ? (
+                            <span className="text-xs bg-green-900/30 text-green-400 border border-green-700/40 px-2 py-0.5 rounded-full">הצלחה</span>
+                          ) : (
+                            <span className="text-xs bg-red-900/30 text-red-400 border border-red-700/40 px-2 py-0.5 rounded-full">כישלון</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 font-mono text-xs">{log.ip_address}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

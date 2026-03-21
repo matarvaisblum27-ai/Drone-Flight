@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { DroneInfo } from '@/lib/types'
+import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,9 @@ function rowToDrone(row: any): DroneInfo {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const { data, error } = await supabase.from('drones').select('*').order('model_name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -44,6 +47,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const body = await req.json()
   const { tailNumber, model, weightKg, serialNumber, extraRegistration } = body
   if (!tailNumber || !model) return NextResponse.json({ error: 'tailNumber and model required' }, { status: 400 })
@@ -69,6 +74,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const tailNumber = req.nextUrl.searchParams.get('tailNumber')
   if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
   const { error } = await supabase.from('drones').delete().eq('tail_number', tailNumber)
@@ -77,6 +84,8 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const { error: authError } = await requireSession(req)
+  if (authError) return authError
   const body = await req.json()
   const { tailNumber, model, weightKg, serialNumber, extraRegistration } = body
   if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
