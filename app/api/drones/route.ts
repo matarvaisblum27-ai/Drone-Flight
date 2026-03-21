@@ -43,6 +43,32 @@ export async function GET() {
   return NextResponse.json(data.map(rowToDrone))
 }
 
+export async function POST(req: NextRequest) {
+  const body = await req.json()
+  const { tailNumber, model, weightKg, serialNumber, extraRegistration } = body
+  if (!tailNumber || !model) return NextResponse.json({ error: 'tailNumber and model required' }, { status: 400 })
+
+  const { data, error } = await supabase
+    .from('drones')
+    .insert({ tail_number: tailNumber, model, weight_kg: weightKg ?? null, serial_number: serialNumber ?? '', extra_registration: extraRegistration || null })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') return NextResponse.json({ error: 'DUPLICATE' }, { status: 409 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  return NextResponse.json(rowToDrone(data), { status: 201 })
+}
+
+export async function DELETE(req: NextRequest) {
+  const tailNumber = req.nextUrl.searchParams.get('tailNumber')
+  if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
+  const { error } = await supabase.from('drones').delete().eq('tail_number', tailNumber)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}
+
 export async function PUT(req: NextRequest) {
   const body = await req.json()
   const { tailNumber, model, weightKg, serialNumber, extraRegistration } = body

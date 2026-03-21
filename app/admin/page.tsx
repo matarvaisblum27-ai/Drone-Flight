@@ -219,11 +219,12 @@ type EditForm = {
   observer: string; gasDropped: boolean; gasDropTime: string
 }
 
-function EditModal({ flight, db, onSave, onCancel }: {
+function EditModal({ flight, db, onSave, onCancel, drones }: {
   flight: Flight
   db: FlightDB
   onSave: (updated: EditForm) => void
   onCancel: () => void
+  drones?: DroneInfo[]
 }) {
   const [form, setForm] = useState<EditForm>({
     pilotId: flight.pilotId,
@@ -291,7 +292,7 @@ function EditModal({ flight, db, onSave, onCancel }: {
           <div>
             <label className={labelCls}>מספר זנב</label>
             <select value={form.tailNumber} onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
-              {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
+              {(drones ?? DRONES).map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
             </select>
           </div>
           <div>
@@ -432,26 +433,48 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
 
 // ── Drone edit modal ──────────────────────────────────────────────────────────
 function DroneEditModal({ drone, onSave, onCancel }: {
-  drone: DroneInfo
+  drone: DroneInfo | null  // null = add new
   onSave: (d: DroneInfo) => void
   onCancel: () => void
 }) {
+  const isNew = drone === null
   const [form, setForm] = useState({
-    model:             drone.model,
-    weightKg:          drone.weightKg != null ? String(drone.weightKg) : '',
-    serialNumber:      drone.serialNumber,
-    extraRegistration: drone.extraRegistration ?? '',
+    tailNumber:        drone?.tailNumber ?? '',
+    model:             drone?.model ?? '',
+    weightKg:          drone?.weightKg != null ? String(drone.weightKg) : '',
+    serialNumber:      drone?.serialNumber ?? '',
+    extraRegistration: drone?.extraRegistration ?? '',
   })
   const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const handleSave = () => {
+    if (!form.tailNumber.trim() || !form.model.trim()) {
+      alert('דגם ומספר זנב הם שדות חובה'); return
+    }
+    onSave({
+      tailNumber: form.tailNumber.trim(),
+      model: form.model.trim(),
+      weightKg: form.weightKg ? Number(form.weightKg) : null,
+      serialNumber: form.serialNumber.trim(),
+      extraRegistration: form.extraRegistration.trim() || null,
+    })
+  }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 className="text-base font-semibold text-white mb-5">עריכת רחפן — <span className="font-mono text-blue-400">{drone.tailNumber}</span></h3>
+        <h3 className="text-base font-semibold text-white mb-5">
+          {isNew ? '🚁 הוספת רחפן חדש' : <>עריכת רחפן — <span className="font-mono text-blue-400">{drone!.tailNumber}</span></>}
+        </h3>
         <div className="space-y-4">
+          {isNew && (
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">מספר זנב <span className="text-red-400">*</span></label>
+              <input value={form.tailNumber} onChange={e => setForm(p => ({ ...p, tailNumber: e.target.value }))} placeholder="למשל: 4x-abc" className={`${cls} font-mono`} />
+            </div>
+          )}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">דגם</label>
-            <input value={form.model} onChange={e => setForm(p => ({ ...p, model: e.target.value }))} className={cls} />
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">דגם <span className="text-red-400">*</span></label>
+            <input value={form.model} onChange={e => setForm(p => ({ ...p, model: e.target.value }))} placeholder="למשל: מאביק 4" className={cls} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">משקל (ק&quot;ג)</label>
@@ -468,10 +491,8 @@ function DroneEditModal({ drone, onSave, onCancel }: {
         </div>
         <div className="flex gap-2 mt-5">
           <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">ביטול</button>
-          <button
-            onClick={() => onSave({ ...drone, model: form.model, weightKg: form.weightKg ? Number(form.weightKg) : null, serialNumber: form.serialNumber, extraRegistration: form.extraRegistration || null })}
-            className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
-            שמור שינויים
+          <button onClick={handleSave} className={`flex-1 px-4 py-2.5 text-sm text-white rounded-xl transition-all font-medium ${isNew ? 'bg-green-600 hover:bg-green-500' : 'bg-blue-600 hover:bg-blue-500'}`}>
+            {isNew ? 'הוסף רחפן' : 'שמור שינויים'}
           </button>
         </div>
       </div>
@@ -548,7 +569,8 @@ export default function AdminDashboard() {
   const [droneDetails, setDroneDetails] = useState<DroneInfo[]>([])
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
   const [expandedDrone, setExpandedDrone] = useState<string | null>(null)
-  const [editDroneModal, setEditDroneModal] = useState<DroneInfo | null>(null)
+  const [editDroneModal, setEditDroneModal] = useState<DroneInfo | 'new' | null>(null)
+  const [confirmDeleteDroneId, setConfirmDeleteDroneId] = useState<string | null>(null)
   const [batteryModal, setBatteryModal] = useState<{ battery: DroneBattery | null; tailNumber: string } | null>(null)
   const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
@@ -637,6 +659,9 @@ export default function AdminDashboard() {
     }
   })
   const maxDroneMins = Math.max(...DRONES.map(d => droneTotalMins[d.tailNumber] ?? 0), 1)
+  const dronesForSelect: DroneInfo[] = droneDetails.length > 0
+    ? droneDetails
+    : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))
 
 
   const handleAddFlight = async () => {
@@ -738,6 +763,24 @@ export default function AdminDashboard() {
     fetchDroneData()
   }
 
+  const handleAddDrone = async (drone: DroneInfo) => {
+    const res = await fetch('/api/drones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(drone) })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert(err.error === 'DUPLICATE' ? 'רחפן עם מספר זנב זה כבר קיים במערכת' : 'שגיאה בהוספת רחפן')
+      return
+    }
+    setEditDroneModal(null)
+    fetchDroneData()
+  }
+
+  const handleDeleteDrone = async (tailNumber: string) => {
+    const res = await fetch(`/api/drones?tailNumber=${encodeURIComponent(tailNumber)}`, { method: 'DELETE' })
+    if (!res.ok) { alert('שגיאה במחיקת רחפן'); return }
+    setConfirmDeleteDroneId(null)
+    fetchDroneData()
+  }
+
   const handleSaveBattery = async (b: Partial<DroneBattery> & { droneTailNumber: string }) => {
     const method = b.id ? 'PUT' : 'POST'
     const res = await fetch('/api/drone-batteries', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
@@ -782,6 +825,7 @@ export default function AdminDashboard() {
         <EditModal
           flight={editFlight}
           db={db}
+          drones={dronesForSelect}
           onSave={handleEdit}
           onCancel={() => setEditFlight(null)}
         />
@@ -800,8 +844,19 @@ export default function AdminDashboard() {
           onCancel={() => setEditPilot(null)}
         />
       )}
-      {editDroneModal && (
-        <DroneEditModal drone={editDroneModal} onSave={handleEditDrone} onCancel={() => setEditDroneModal(null)} />
+      {editDroneModal !== null && (
+        <DroneEditModal
+          drone={editDroneModal === 'new' ? null : editDroneModal}
+          onSave={editDroneModal === 'new' ? handleAddDrone : handleEditDrone}
+          onCancel={() => setEditDroneModal(null)}
+        />
+      )}
+      {confirmDeleteDroneId && (
+        <ConfirmDialog
+          message={`מחיקת רחפן ${confirmDeleteDroneId} תסיר אותו מהמערכת. היסטוריית הטיסות שלו תישמר.`}
+          onConfirm={() => handleDeleteDrone(confirmDeleteDroneId)}
+          onCancel={() => setConfirmDeleteDroneId(null)}
+        />
       )}
       {batteryModal && (
         <BatteryModal battery={batteryModal.battery} tailNumber={batteryModal.tailNumber} onSave={handleSaveBattery} onCancel={() => setBatteryModal(null)} />
@@ -1301,7 +1356,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <div>
                 <label className={labelCls}>מספר זנב</label>
                 <select value={addForm.tailNumber} onChange={e => setAddForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
-                  {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
+                  {dronesForSelect.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                 </select>
               </div>
               <div>
@@ -1572,10 +1627,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             </div>
 
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
-              <div className="p-5 border-b border-slate-700/50">
+              <div className="p-5 border-b border-slate-700/50 flex items-center justify-between gap-4">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-blue-400">🚁</span> ניהול רחפנים ({droneDetails.length || DRONES.length})
                 </h2>
+                <button
+                  onClick={() => setEditDroneModal('new')}
+                  className="flex items-center gap-1.5 text-sm text-white bg-green-700/80 hover:bg-green-600 border border-green-600/50 px-3 py-2 rounded-xl transition-all font-medium shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  הוסף רחפן חדש
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1623,6 +1685,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                   title="עריכה"
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+                                {/* Delete drone */}
+                                <button
+                                  onClick={() => setConfirmDeleteDroneId(drone.tailNumber)}
+                                  className="text-xs text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2.5 py-1.5 rounded-lg transition-all"
+                                  title="מחיקה"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 </button>
                                 {/* Batteries toggle */}
                                 <button
