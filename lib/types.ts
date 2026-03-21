@@ -2,6 +2,7 @@ export interface Pilot {
   id: string
   name: string
   license: string
+  isAdmin?: boolean
 }
 
 export interface Flight {

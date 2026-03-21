@@ -390,21 +390,27 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
 }
 
 // ── Pilot edit modal ──────────────────────────────────────────────────────────
+const ADMIN_FIXED_NAME = 'אורן וייסבלום'
 function PilotEditModal({ pilot, onSave, onCancel }: {
   pilot: Pilot | null  // null = add mode
-  onSave: (name: string, license: string) => void
+  onSave: (name: string, license: string, password: string, isAdmin: boolean) => void
   onCancel: () => void
 }) {
   const [name, setName] = useState(pilot?.name ?? '')
   const [license, setLicense] = useState(pilot?.license ?? '')
+  const [password, setPassword] = useState('')
+  const [isAdmin, setIsAdmin] = useState(pilot?.isAdmin ?? false)
   const [error, setError] = useState('')
+  const isAdd = pilot === null
+  const isFixedAdmin = pilot?.name === ADMIN_FIXED_NAME
 
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   const handleSave = () => {
     if (!name.trim() || !license.trim()) { setError('יש למלא שם ומספר רישיון'); return }
-    onSave(name.trim(), license.trim())
+    if (isAdd && !password.trim()) { setError('יש להגדיר סיסמה לטייס חדש'); return }
+    onSave(name.trim(), license.trim(), password.trim(), isAdmin)
   }
 
   return (
@@ -433,6 +439,33 @@ function PilotEditModal({ pilot, onSave, onCancel }: {
             <input type="text" value={license} onChange={e => { setLicense(e.target.value); setError('') }}
               placeholder="123456" className={inputCls} />
           </div>
+          <div>
+            <label className={labelCls}>
+              {isAdd ? 'סיסמה' : 'סיסמה חדשה (השאר ריק לשמור קיימת)'}
+            </label>
+            <input type="password" value={password} onChange={e => { setPassword(e.target.value); setError('') }}
+              placeholder={isAdd ? 'הזן סיסמה' : '••••••••'}
+              className={inputCls} />
+          </div>
+          {!isFixedAdmin && (
+            <div className="flex items-center justify-between bg-slate-700/40 border border-slate-600/40 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-sm text-white font-medium">הרשאת מנהל</p>
+                <p className="text-xs text-slate-400">גישה לדשבורד מלא</p>
+              </div>
+              <button
+                onClick={() => setIsAdmin(v => !v)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${isAdmin ? 'bg-blue-600' : 'bg-slate-600'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${isAdmin ? 'translate-x-5 right-0.5' : 'translate-x-0 right-5'}`} />
+              </button>
+            </div>
+          )}
+          {isFixedAdmin && (
+            <div className="flex items-center gap-2 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
+              <span className="text-xs text-blue-400">מפקד ראשי — הרשאות מנהל קבועות</span>
+            </div>
+          )}
         </div>
         {error && <div className="mt-3 bg-red-900/20 border border-red-700/40 rounded-lg px-3 py-2 text-sm text-red-400">{error}</div>}
         <div className="flex gap-2 mt-6">
@@ -608,10 +641,15 @@ export default function AdminDashboard() {
   const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
+  const [currentUserName, setCurrentUserName] = useState<string>(ADMIN_NAME)
 
   useEffect(() => {
-    const user = sessionStorage.getItem('currentUser')
-    if (user !== ADMIN_NAME) router.replace('/')
+    fetch('/api/auth/me').then(async r => {
+      if (!r.ok) { router.replace('/'); return }
+      const s = await r.json()
+      if (!s.isAdmin) { router.replace('/'); return }
+      setCurrentUserName(s.name)
+    }).catch(() => router.replace('/'))
   }, [router])
 
   const fetchDB = useCallback(async () => {
@@ -782,10 +820,10 @@ export default function AdminDashboard() {
     fetchDB()
   }
 
-  const handleAddPilot = async (name: string, license: string) => {
+  const handleAddPilot = async (name: string, license: string, password: string) => {
     const res = await fetch('/api/pilots', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, license }),
+      body: JSON.stringify({ name, license, password }),
     })
     if (!res.ok) {
       if (res.status === 409) alert('טייס עם שם זה כבר קיים במערכת')
@@ -798,17 +836,19 @@ export default function AdminDashboard() {
     fetchDB()
   }
 
-  const handleEditPilot = async (name: string, license: string) => {
+  const handleEditPilot = async (name: string, license: string, newPassword: string, isAdmin: boolean) => {
     if (!editPilot || editPilot === 'add') return
     const pilot = editPilot as Pilot
+    const body: Record<string, unknown> = { id: pilot.id, name, license, isAdmin }
+    if (newPassword) body.newPassword = newPassword
     const res = await fetch('/api/pilots', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pilot.id, name, license }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) { alert('שגיאה בעריכת טייס'); return }
     setDb(prev => prev ? {
       ...prev,
-      pilots: prev.pilots.map(p => p.id === pilot.id ? { ...p, name, license } : p),
+      pilots: prev.pilots.map(p => p.id === pilot.id ? { ...p, name, license, isAdmin } : p),
     } : prev)
     setEditPilot(null)
     fetchDB()
@@ -951,9 +991,9 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-300 hidden sm:block">{ADMIN_NAME}</span>
+            <span className="text-sm text-slate-300 hidden sm:block">{currentUserName}</span>
             <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full">מפקד</span>
-            <button onClick={() => { sessionStorage.clear(); router.push('/') }}
+            <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/'))}
               className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
               יציאה
             </button>
@@ -1651,7 +1691,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['#', 'שם', 'רישיון', 'טיסות', 'סה"כ שעות', 'שעות החודש', 'שעות מתחילת השנה', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
+                      {['#', 'שם', 'הרשאות', 'רישיון', 'טיסות', 'סה"כ שעות', 'שעות החודש', 'שעות מתחילת השנה', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
                         <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -1661,7 +1701,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       const pFlights = db.flights.filter(f => f.pilotId === p.id)
                       const totalMins = pFlights.reduce((a, f) => a + f.duration, 0)
                       const lastDate = pFlights.sort((a, b) => b.date.localeCompare(a.date))[0]?.date
-                      const isAdmin = p.name === ADMIN_NAME
+                      const isAdmin = p.name === ADMIN_NAME || p.isAdmin === true
                       return (
                         <tr key={p.id} className="hover:bg-slate-700/20 transition-colors">
                           <td className="px-5 py-4 text-xs text-slate-500">{i + 1}</td>
@@ -1670,13 +1710,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                               <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-700/40 flex items-center justify-center text-xs font-bold text-blue-400 flex-shrink-0">
                                 {p.name[0]}
                               </div>
-                              <div>
-                                <span className="text-sm font-medium text-white">{p.name}</span>
-                                {isAdmin && (
-                                  <span className="mr-2 text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-1.5 py-0.5 rounded-full">מפקד</span>
-                                )}
-                              </div>
+                              <span className="text-sm font-medium text-white">{p.name}</span>
                             </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            {isAdmin ? (
+                              <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                {p.name === ADMIN_NAME ? 'מפקד ראשי' : 'מנהל'}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-600">טייס</span>
+                            )}
                           </td>
                           <td className="px-5 py-4 text-slate-400 font-mono text-xs">{p.license}</td>
                           <td className="px-5 py-4 text-slate-300">{pFlights.length}</td>

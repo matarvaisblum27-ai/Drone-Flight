@@ -55,6 +55,79 @@ function calcDuration(start: string, end: string): number {
   return mins
 }
 
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+
+  const handleSave = async () => {
+    if (!current || !next || !confirm) { setError('יש למלא את כל השדות'); return }
+    if (next !== confirm) { setError('הסיסמאות החדשות אינן תואמות'); return }
+    if (next.length < 4) { setError('סיסמה חייבת להכיל לפחות 4 תווים'); return }
+    setLoading(true); setError('')
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'שגיאה בשינוי סיסמה'); return }
+      setSuccess(true)
+      setTimeout(onClose, 1500)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-slate-800 border border-slate-700/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-semibold text-white">🔑 שינוי סיסמה</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700 transition-all">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {success ? (
+          <div className="text-center py-4 text-green-400 font-medium">הסיסמה עודכנה בהצלחה ✓</div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">סיסמה נוכחית</label>
+              <input type="password" value={current} onChange={e => { setCurrent(e.target.value); setError('') }} className={cls} placeholder="••••••••" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">סיסמה חדשה</label>
+              <input type="password" value={next} onChange={e => { setNext(e.target.value); setError('') }} className={cls} placeholder="••••••••" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">אישור סיסמה חדשה</label>
+              <input type="password" value={confirm} onChange={e => { setConfirm(e.target.value); setError('') }} className={cls} placeholder="••••••••" />
+            </div>
+            {error && <p className="text-sm text-red-400">{error}</p>}
+            <div className="flex gap-2 mt-2">
+              <button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">ביטול</button>
+              <button onClick={handleSave} disabled={loading}
+                className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium disabled:opacity-60">
+                {loading ? 'שומר...' : 'שמור'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function PilotDashboard() {
   const router = useRouter()
   const [userName, setUserName] = useState('')
@@ -69,11 +142,15 @@ export default function PilotDashboard() {
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [showChangePwd, setShowChangePwd] = useState(false)
 
   useEffect(() => {
-    const user = sessionStorage.getItem('currentUser')
-    if (!user || user === 'אורן וייסבלום') { router.replace('/'); return }
-    setUserName(user)
+    fetch('/api/auth/me').then(async r => {
+      if (!r.ok) { router.replace('/'); return }
+      const s = await r.json()
+      if (s.isAdmin) { router.replace('/admin'); return }
+      setUserName(s.name)
+    }).catch(() => router.replace('/'))
   }, [router])
 
   const fetchDB = useCallback(async () => {
@@ -160,6 +237,7 @@ export default function PilotDashboard() {
           onCancel={() => setConfirmId(null)}
         />
       )}
+      {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
 
       {/* Header */}
       <header className="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 sticky top-0 z-30">
@@ -176,7 +254,13 @@ export default function PilotDashboard() {
             </div>
           </div>
           <button
-            onClick={() => { sessionStorage.clear(); router.push('/') }}
+            onClick={() => setShowChangePwd(true)}
+            className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
+          >
+            שנה סיסמה
+          </button>
+          <button
+            onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/'))}
             className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
           >
             יציאה

@@ -3,19 +3,15 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pilot } from '@/lib/types'
 
-const ADMIN_NAME = 'אורן וייסבלום'
-const ADMIN_PASSWORD = 'oren3004'
-
 export default function LoginPage() {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [pilots, setPilots] = useState<Pilot[]>([])
   const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError] = useState(false)
   const router = useRouter()
-
-  const isAdmin = name.trim() === ADMIN_NAME
 
   useEffect(() => {
     fetch('/api/pilots')
@@ -24,7 +20,6 @@ export default function LoginPage() {
         if (Array.isArray(data)) {
           setPilots(data)
         } else {
-          // API returned an error object (e.g. missing env vars, DB not set up)
           console.error('Failed to load pilots:', data)
           setApiError(true)
         }
@@ -33,20 +28,37 @@ export default function LoginPage() {
       .catch(() => { setApiError(true); setLoading(false) })
   }, [])
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     const trimmed = name.trim()
     if (!trimmed) { setError('נא להזין שם'); return }
+    if (!password) { setError('נא להזין סיסמה'); return }
     if (apiError || !Array.isArray(pilots) || !pilots.some(p => p.name === trimmed)) {
       setError('שם לא מזוהה במערכת. פנה למפקד היחידה.')
       return
     }
-    if (trimmed === ADMIN_NAME && password !== ADMIN_PASSWORD) {
-      setError('סיסמה שגויה')
-      return
+
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error === 'invalid_credentials' ? 'סיסמה שגויה' : 'שגיאת התחברות')
+        return
+      }
+      router.push(data.isAdmin ? '/admin' : '/pilot')
+    } catch {
+      setError('שגיאת רשת — נסה שוב')
+    } finally {
+      setSubmitting(false)
     }
-    sessionStorage.setItem('currentUser', trimmed)
-    router.push(trimmed === ADMIN_NAME ? '/admin' : '/pilot')
   }
+
+  const isDisabled = loading || submitting
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -74,7 +86,7 @@ export default function LoginPage() {
 
         <div className="bg-slate-800/80 backdrop-blur border border-slate-700/60 rounded-2xl p-8 shadow-2xl">
           <h2 className="text-xl font-semibold text-slate-100 mb-1">כניסה למערכת</h2>
-          <p className="text-slate-400 text-sm mb-6">הזן את שמך המלא לאימות זהות</p>
+          <p className="text-slate-400 text-sm mb-6">הזן את שמך המלא וסיסמתך</p>
 
           {apiError && (
             <div className="mb-4 bg-red-900/30 border border-red-700/50 rounded-xl px-4 py-3 text-sm text-red-400">
@@ -89,31 +101,29 @@ export default function LoginPage() {
                 type="text"
                 value={name}
                 onChange={e => { setName(e.target.value); setError('') }}
-                onKeyDown={e => e.key === 'Enter' && !loading && handleLogin()}
+                onKeyDown={e => e.key === 'Enter' && !isDisabled && handleLogin()}
                 placeholder="לדוגמה: ישראל חסדאי"
-                disabled={loading}
+                disabled={isDisabled}
                 className="w-full bg-slate-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500
                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-right
                   disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
-            {isAdmin && (
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">סיסמה</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => { setPassword(e.target.value); setError('') }}
-                  onKeyDown={e => e.key === 'Enter' && !loading && handleLogin()}
-                  placeholder="הזן סיסמה"
-                  disabled={loading}
-                  className="w-full bg-slate-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-right
-                    disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">סיסמה</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => { setPassword(e.target.value); setError('') }}
+                onKeyDown={e => e.key === 'Enter' && !isDisabled && handleLogin()}
+                placeholder="הזן סיסמה"
+                disabled={isDisabled}
+                className="w-full bg-slate-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-right
+                  disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+            </div>
 
             <div>
               {error && (
@@ -128,15 +138,15 @@ export default function LoginPage() {
 
             <button
               onClick={handleLogin}
-              disabled={loading}
+              disabled={isDisabled}
               className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-3 px-4
                 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/30
                 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? (
+              {isDisabled ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  טוען...
+                  {loading ? 'טוען...' : 'מתחבר...'}
                 </>
               ) : (
                 <>

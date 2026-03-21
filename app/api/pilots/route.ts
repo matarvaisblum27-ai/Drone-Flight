@@ -1,32 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { Pilot } from '@/lib/types'
+import bcrypt from 'bcryptjs'
 
 export const dynamic = 'force-dynamic'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToPilot(row: any): Pilot {
+  return { id: row.id, name: row.name, license: row.license, isAdmin: row.is_admin ?? false }
+}
+
 export async function GET() {
   const { data, error } = await supabase
     .from('pilots')
-    .select('*')
+    .select('id, name, license, is_admin')
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data as Pilot[])
+  return NextResponse.json((data ?? []).map(rowToPilot))
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const name = body.name?.trim()
   const license = body.license?.trim()
+  const password = body.password ?? ''
   if (!name || !license) {
     return NextResponse.json({ error: 'name and license required' }, { status: 400 })
   }
+  if (!password) {
+    return NextResponse.json({ error: 'password is required' }, { status: 400 })
+  }
+
+  const password_hash = await bcrypt.hash(password, 12)
 
   const { data, error } = await supabase
     .from('pilots')
-    .insert({ id: `p${Date.now()}`, name, license })
-    .select()
+    .insert({ id: `p${Date.now()}`, name, license, password_hash, is_admin: false })
+    .select('id, name, license, is_admin')
     .single()
 
   if (error) {
@@ -35,7 +47,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  return NextResponse.json(data as Pilot, { status: 201 })
+  return NextResponse.json(rowToPilot(data), { status: 201 })
 }
 
 export async function PUT(req: NextRequest) {
@@ -48,23 +60,37 @@ export async function PUT(req: NextRequest) {
 
   const { data: existing, error: fetchErr } = await supabase
     .from('pilots')
-    .select('name')
+    .select('name, is_admin')
     .eq('id', body.id)
     .single()
   if (fetchErr || !existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
+  // Build update object
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = { name, license }
+
+  // Admin toggle — cannot demote אורן וייסבלום
+  if (body.isAdmin !== undefined && existing.name !== ADMIN_NAME) {
+    updates.is_admin = !!body.isAdmin
+  }
+
+  // Password reset by admin
+  if (body.newPassword) {
+    updates.password_hash = await bcrypt.hash(body.newPassword, 12)
+  }
+
   const { data, error } = await supabase
     .from('pilots')
-    .update({ name, license })
+    .update(updates)
     .eq('id', body.id)
-    .select()
+    .select('id, name, license, is_admin')
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   if (existing.name !== name) {
     await supabase.from('flights').update({ pilot_name: name }).eq('pilot_id', body.id)
   }
-  return NextResponse.json(data as Pilot)
+  return NextResponse.json(rowToPilot(data))
 }
 
 export async function DELETE(req: NextRequest) {
