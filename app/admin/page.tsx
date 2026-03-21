@@ -656,16 +656,18 @@ export default function AdminDashboard() {
   // Drone minutes YTD + monthly breakdown
   const droneYTDMins: Record<string, number> = {}
   const droneMonthlyMins: Record<string, Record<string, number>> = {}
-  const droneMonthlyPilots: Record<string, Record<string, Set<string>>> = {}
+  // drone → month → pilotName → minutes
+  const droneMonthlyPilotMins: Record<string, Record<string, Record<string, number>>> = {}
   db.flights.forEach(f => {
     if (!f.date.startsWith(thisYear)) return
     droneYTDMins[f.tailNumber] = (droneYTDMins[f.tailNumber] || 0) + f.duration
     const month = f.date.slice(0, 7)
     if (!droneMonthlyMins[f.tailNumber]) droneMonthlyMins[f.tailNumber] = {}
-    if (!droneMonthlyPilots[f.tailNumber]) droneMonthlyPilots[f.tailNumber] = {}
+    if (!droneMonthlyPilotMins[f.tailNumber]) droneMonthlyPilotMins[f.tailNumber] = {}
     droneMonthlyMins[f.tailNumber][month] = (droneMonthlyMins[f.tailNumber][month] || 0) + f.duration
-    if (!droneMonthlyPilots[f.tailNumber][month]) droneMonthlyPilots[f.tailNumber][month] = new Set()
-    droneMonthlyPilots[f.tailNumber][month].add(f.pilotName)
+    if (!droneMonthlyPilotMins[f.tailNumber][month]) droneMonthlyPilotMins[f.tailNumber][month] = {}
+    const pm = droneMonthlyPilotMins[f.tailNumber][month]
+    pm[f.pilotName] = (pm[f.pilotName] || 0) + f.duration
   })
 
   // Pilot month + YTD minutes
@@ -1121,30 +1123,39 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       {/* Expandable monthly breakdown */}
                       <div
                         className="overflow-hidden transition-all duration-300 ease-in-out"
-                        style={{ maxHeight: isOpen ? '600px' : '0px', opacity: isOpen ? 1 : 0 }}
+                        style={{ maxHeight: isOpen ? '1200px' : '0px', opacity: isOpen ? 1 : 0 }}
                       >
-                        <div className="mt-2 bg-slate-900/60 border border-slate-700/40 rounded-xl p-3" dir="rtl">
-                          <p className="text-[10px] font-semibold text-slate-400 mb-2">פירוט חודשי — {thisYear}</p>
+                        <div className="mt-2 bg-slate-900/60 border border-slate-700/40 rounded-xl p-4" dir="rtl">
+                          <p className="text-xs font-semibold text-slate-300 mb-3">פירוט חודשי — {thisYear}</p>
                           {monthlyData.length === 0 ? (
-                            <p className="text-xs text-slate-600">אין טיסות השנה</p>
+                            <p className="text-sm text-slate-600">אין טיסות השנה</p>
                           ) : (
-                            <div className="space-y-2">
-                              {monthlyData.map(([month, mins]) => {
+                            <div className="space-y-4">
+                              {monthlyData.map(([month, totalMins]) => {
                                 const monthIdx = parseInt(month.slice(5, 7)) - 1
-                                const pilots = Array.from(droneMonthlyPilots[drone.tailNumber]?.[month] ?? [])
+                                const pilotMins = droneMonthlyPilotMins[drone.tailNumber]?.[month] ?? {}
+                                const pilotEntries = Object.entries(pilotMins).sort((a, b) => b[1] - a[1])
                                 return (
-                                  <div key={month}>
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-[10px] font-medium text-slate-400">{HEBREW_MONTH_NAMES[monthIdx]}</span>
-                                      <span className="text-[10px] font-bold text-blue-400">{fmtHours(mins)}</span>
+                                  <div key={month} className="bg-slate-800/50 rounded-lg p-3">
+                                    <p className="text-xs font-bold text-white mb-2">{HEBREW_MONTH_NAMES[monthIdx]}</p>
+                                    <div className="space-y-1.5 mb-2">
+                                      {pilotEntries.map(([pilotName, mins]) => (
+                                        <div key={pilotName} className="flex items-center justify-between">
+                                          <span className="text-xs text-slate-400">— {pilotName}</span>
+                                          <span className="text-xs font-medium text-blue-300">{fmtHours(mins)}</span>
+                                        </div>
+                                      ))}
                                     </div>
-                                    <p className="text-[9px] text-slate-600 mt-0.5">{pilots.join(', ')}</p>
+                                    <div className="border-t border-slate-700/50 pt-1.5 flex items-center justify-between">
+                                      <span className="text-xs text-slate-500">סה&quot;כ {HEBREW_MONTH_NAMES[monthIdx]}</span>
+                                      <span className="text-xs font-bold text-blue-400">{fmtHours(totalMins)}</span>
+                                    </div>
                                   </div>
                                 )
                               })}
-                              <div className="border-t border-slate-700/40 pt-2 flex items-center justify-between">
-                                <span className="text-[10px] font-semibold text-slate-300">סה&quot;כ שנה</span>
-                                <span className="text-[10px] font-bold text-cyan-400">{fmtHours(ytdMins)}</span>
+                              <div className="border-t border-slate-600/50 pt-2 flex items-center justify-between">
+                                <span className="text-sm font-bold text-slate-200">סה&quot;כ שנה</span>
+                                <span className="text-sm font-bold text-cyan-400">{fmtHours(ytdMins)}</span>
                               </div>
                             </div>
                           )}
