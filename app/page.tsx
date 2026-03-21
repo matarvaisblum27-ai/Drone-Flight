@@ -61,8 +61,8 @@ export default function LoginPage() {
 
       <div className="relative w-full max-w-md">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-36 h-36 mb-6">
-            <img src="/logo.png" alt="לוגו יחידה" className="w-36 h-36 object-contain" />
+          <div className="inline-flex items-center justify-center mb-6">
+            <img src="/logo.png" alt="לוגו יחידה" className="w-56 h-56 object-contain drop-shadow-2xl" />
           </div>
           <h1 className="text-3xl font-bold text-white tracking-wide">מערכת ניהול טיסות</h1>
           <p className="text-slate-400 mt-2 text-sm">יחידת רחפנים | מסווג</p>
