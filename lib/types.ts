@@ -14,12 +14,10 @@ export interface Flight {
   battery: string
   startTime: string
   endTime: string
-  batteryStart: number
-  batteryEnd: number
   duration: number // minutes
   observer: string
   gasDropped: boolean
-  gasDropTime: string
+  eventNumber: string // free-text event number for gas drops (stored in gas_drop_time column)
 }
 
 export interface FlightDB {
@@ -60,4 +58,21 @@ export interface DroneBattery {
   batteryName: string
   chargeCycle: string      // e.g. "287-282"
   inspectionDate: string
+}
+
+/** Returns true when all operationally-important fields are filled. */
+export function isFlightComplete(f: Flight): boolean {
+  return !!(f.missionName && f.tailNumber && f.battery && f.startTime && f.endTime && f.duration > 0)
+}
+
+/** Lists human-readable names of missing fields for an incomplete flight. */
+export function missingFields(f: Flight): string[] {
+  const missing: string[] = []
+  if (!f.missionName) missing.push('שם משימה')
+  if (!f.tailNumber)  missing.push('מספר זנב')
+  if (!f.battery)     missing.push('סוללה')
+  if (!f.startTime)   missing.push('שעת המראה')
+  if (!f.endTime)     missing.push('שעת נחיתה')
+  if (!f.duration)    missing.push('משך טיסה')
+  return missing
 }

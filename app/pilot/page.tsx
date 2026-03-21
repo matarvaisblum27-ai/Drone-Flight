@@ -1,10 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB } from '@/lib/types'
+import { FlightDB, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
-
-const BATTERY_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
 
 function ConfirmDialog({ message, onConfirm, onCancel }: {
   message: string; onConfirm: () => void; onCancel: () => void
@@ -62,8 +60,8 @@ export default function PilotDashboard() {
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
   const [form, setForm] = useState({
     date: '', missionName: '', tailNumber: '4x-pzk',
-    battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '',
-    observer: '', gasDropped: false, gasDropTime: '',
+    battery: '', startTime: '', endTime: '',
+    observer: '', gasDropped: false, eventNumber: '',
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -102,28 +100,24 @@ export default function PilotDashboard() {
   const handleSubmit = async () => {
     setFormError('')
     setFormSuccess('')
-    const { date, missionName, tailNumber, battery, startTime, endTime, batteryStart, batteryEnd } = form
-    if (!date || !missionName || !startTime || !endTime || !batteryStart || !batteryEnd) {
-      setFormError('יש למלא את כל השדות')
-      return
+    const { date, startTime, endTime } = form
+    if (!date) { setFormError('תאריך הוא שדה חובה'); return }
+    if (startTime && endTime) {
+      const dur = calcDuration(startTime, endTime)
+      if (dur <= 0) { setFormError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
     }
-    const bs = Number(batteryStart), be = Number(batteryEnd)
-    if (bs < 0 || bs > 100 || be < 0 || be > 100) {
-      setFormError('אחוז סוללה חייב להיות בין 0 ל-100')
-      return
-    }
-    const dur = calcDuration(startTime, endTime)
-    if (dur <= 0) { setFormError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
-
     if (!pilot) { setFormError('שגיאה: טייס לא מזוהה'); return }
+
+    const duration = startTime && endTime ? calcDuration(startTime, endTime) : 0
 
     const res = await fetch('/api/flights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pilotId: pilot.id, pilotName: pilot.name, date, missionName, tailNumber,
-        battery, startTime, endTime, batteryStart: bs, batteryEnd: be, duration: dur,
-        observer: form.observer, gasDropped: form.gasDropped, gasDropTime: form.gasDropTime,
+        pilotId: pilot.id, pilotName: pilot.name, date: form.date,
+        missionName: form.missionName, tailNumber: form.tailNumber,
+        battery: form.battery, startTime, endTime, duration,
+        observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber,
       }),
     })
     if (!res.ok) {
@@ -131,7 +125,7 @@ export default function PilotDashboard() {
       setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד לעדכון בסיס הנתונים' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: 'A', startTime: '', endTime: '', batteryStart: '', batteryEnd: '', observer: '', gasDropped: false, gasDropTime: '' })
+    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '' })
     fetchDB()
     setTimeout(() => setActiveTab('history'), 1200)
   }
@@ -145,7 +139,6 @@ export default function PilotDashboard() {
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
-  // Compute duration preview
   const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
 
   return (
@@ -186,12 +179,12 @@ export default function PilotDashboard() {
         {/* Personal stat cards */}
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-            <p className="text-xs text-slate-400 mb-3">סה"כ שעות</p>
+            <p className="text-xs text-slate-400 mb-3">סה&quot;כ שעות</p>
             <p className="text-2xl font-bold text-blue-400">{fmtHours(totalMinutes)}</p>
             <p className="text-xs text-slate-500 mt-1">{Math.floor(totalMinutes / 60)}:{String(totalMinutes % 60).padStart(2,'0')} שעות</p>
           </div>
           <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-            <p className="text-xs text-slate-400 mb-3">סה"כ משימות</p>
+            <p className="text-xs text-slate-400 mb-3">סה&quot;כ משימות</p>
             <p className="text-2xl font-bold text-indigo-400">{myFlights.length}</p>
             <p className="text-xs text-slate-500 mt-1">טיסות רשומות</p>
           </div>
@@ -260,25 +253,6 @@ export default function PilotDashboard() {
               })()}
             </div>
 
-            {/* Battery usage breakdown */}
-            {myFlights.length > 0 && (
-              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
-                <h2 className="text-sm font-semibold text-white mb-4">שימוש בסוללות</h2>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-                  {BATTERY_LABELS.map(bat => {
-                    const count = myFlights.filter(f => f.battery === bat).length
-                    return (
-                      <div key={bat} className="bg-slate-700/40 rounded-xl p-3 text-center border border-slate-600/30">
-                        <p className="text-xs text-slate-400 mb-1">סוללה {bat}</p>
-                        <p className="text-xl font-bold text-blue-400">{count}</p>
-                        <p className="text-xs text-slate-500">טיסות</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* Last 3 flights */}
             {myFlights.length > 0 && (
               <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
@@ -287,14 +261,14 @@ export default function PilotDashboard() {
                   {myFlights.slice(0, 3).map(f => (
                     <div key={f.id} className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30 flex items-center justify-between gap-4">
                       <div>
-                        <p className="text-sm font-medium text-white">{f.missionName}</p>
+                        <p className="text-sm font-medium text-white">{f.missionName || '—'}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)} · סוללה {f.battery}{f.observer ? ` · 👁 ${f.observer}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}</span> : ''}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)}{f.battery ? ` · סוללה ${f.battery}` : ''}{f.observer ? ` · 👁 ${f.observer}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}</span> : ''}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
-                        <p className="text-sm font-bold text-blue-400">{fmtHours(f.duration)}</p>
-                        <p className="text-xs text-slate-500">{f.startTime}–{f.endTime}</p>
+                        <p className="text-sm font-bold text-blue-400">{f.duration > 0 ? fmtHours(f.duration) : '—'}</p>
+                        <p className="text-xs text-slate-500">{f.startTime && f.endTime ? `${f.startTime}–${f.endTime}` : '—'}</p>
                       </div>
                     </div>
                   ))}
@@ -310,9 +284,10 @@ export default function PilotDashboard() {
             <h2 className="text-sm font-semibold text-white mb-6 flex items-center gap-2">
               <span className="text-blue-400">✈️</span> רישום טיסה חדשה
             </h2>
+            <p className="text-xs text-slate-500 mb-4">שדות חובה: תאריך. שאר השדות ניתן להשלים מאוחר יותר.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelCls}>תאריך</label>
+                <label className={labelCls}>תאריך <span className="text-red-400">*</span></label>
                 <input type="date" value={form.date}
                   onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                   className={inputCls} />
@@ -333,13 +308,9 @@ export default function PilotDashboard() {
               </div>
               <div>
                 <label className={labelCls}>סוללה</label>
-                <select value={form.battery}
+                <input type="text" value={form.battery}
                   onChange={e => setForm(f => ({ ...f, battery: e.target.value }))}
-                  className={inputCls}>
-                  {BATTERY_LABELS.map(b => (
-                    <option key={b} value={b}>סוללה {b} (כרגע: {db.batteries[b]}%)</option>
-                  ))}
-                </select>
+                  placeholder="שם הסוללה..." className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>שעת המראה</label>
@@ -353,18 +324,6 @@ export default function PilotDashboard() {
                   onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
                   className={inputCls} />
               </div>
-              <div>
-                <label className={labelCls}>% סוללה — תחילה</label>
-                <input type="number" min="0" max="100" placeholder="100" value={form.batteryStart}
-                  onChange={e => setForm(f => ({ ...f, batteryStart: e.target.value }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>% סוללה — סיום</label>
-                <input type="number" min="0" max="100" placeholder="40" value={form.batteryEnd}
-                  onChange={e => setForm(f => ({ ...f, batteryEnd: e.target.value }))}
-                  className={inputCls} />
-              </div>
               <div className="sm:col-span-2">
                 <label className={labelCls}>תצפיתן (אופציונלי)</label>
                 <input type="text" value={form.observer}
@@ -376,16 +335,16 @@ export default function PilotDashboard() {
                   <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input type="checkbox" checked={form.gasDropped}
-                      onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, gasDropTime: e.target.checked ? f.gasDropTime : '' }))}
+                      onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, eventNumber: e.target.checked ? f.eventNumber : '' }))}
                       className="w-4 h-4 accent-amber-500" />
                     <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
                   </label>
                   {form.gasDropped && (
                     <div className="mt-3">
-                      <label className="block text-xs font-medium text-amber-400/80 mb-1.5">שעת הטלה</label>
-                      <input type="time" value={form.gasDropTime}
-                        onChange={e => setForm(f => ({ ...f, gasDropTime: e.target.value }))}
-                        className={inputCls} />
+                      <label className="block text-xs font-medium text-amber-400/80 mb-1.5">מספר אירוע</label>
+                      <input type="text" value={form.eventNumber}
+                        onChange={e => setForm(f => ({ ...f, eventNumber: e.target.value }))}
+                        placeholder="מס׳ אירוע..." className={inputCls} />
                     </div>
                   )}
                 </div>
@@ -447,44 +406,54 @@ export default function PilotDashboard() {
               </div>
             ) : (
               <div className="divide-y divide-slate-700/30">
-                {myFlights.map((f, i) => (
-                  <div key={f.id} className="px-6 py-4 hover:bg-slate-700/20 transition-colors flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs text-slate-500">#{myFlights.length - i}</span>
-                        <h3 className="text-sm font-semibold text-white truncate">{f.missionName}</h3>
+                {myFlights.map((f, i) => {
+                  const complete = isFlightComplete(f)
+                  const missing = complete ? [] : missingFields(f)
+                  return (
+                    <div key={f.id}
+                      className={`px-6 py-4 transition-colors flex items-start justify-between gap-4 ${complete ? 'hover:bg-slate-700/20' : 'bg-red-900/20 hover:bg-red-900/30'}`}
+                      title={complete ? undefined : `חסרים: ${missing.join(', ')}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs text-slate-500">#{myFlights.length - i}</span>
+                          <h3 className="text-sm font-semibold text-white truncate">{f.missionName || <span className="text-red-400 italic">ללא שם משימה</span>}</h3>
+                          {!complete && (
+                            <span className="text-xs bg-red-900/40 border border-red-700/50 text-red-400 px-1.5 py-0.5 rounded-md flex-shrink-0">חסר מידע</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                          <span>📅 {new Date(f.date).toLocaleDateString('he-IL')}</span>
+                          <span>✈️ {droneLabel(f.tailNumber)}</span>
+                          {f.battery && <span>🔋 {f.battery}</span>}
+                          {f.startTime && f.endTime && <span>🕐 {f.startTime}–{f.endTime}</span>}
+                          {f.observer && <span>👁 {f.observer}</span>}
+                          {f.gasDropped && (
+                            <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
+                              💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                        <span>📅 {new Date(f.date).toLocaleDateString('he-IL')}</span>
-                        <span>✈️ {droneLabel(f.tailNumber)}</span>
-                        <span>🔋 סוללה {f.battery}: {f.batteryStart}% ← {f.batteryEnd}%</span>
-                        <span>🕐 {f.startTime}–{f.endTime}</span>
-                        {f.observer && <span>👁 {f.observer}</span>}
-                        {f.gasDropped && (
-                          <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
-                            💧 הטלת גז{f.gasDropTime ? ` ${f.gasDropTime}` : ''}
-                          </span>
-                        )}
+                      <div className="flex items-start gap-3 flex-shrink-0">
+                        <div className="text-right">
+                          <p className="text-base font-bold text-blue-400">{f.duration > 0 ? fmtHours(f.duration) : '—'}</p>
+                          <p className="text-xs text-slate-500">{f.duration > 0 ? `${f.duration} דק'` : ''}</p>
+                        </div>
+                        <button
+                          onClick={() => setConfirmId(f.id)}
+                          title="מחיקה"
+                          className="text-slate-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20 mt-0.5"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-start gap-3 flex-shrink-0">
-                      <div className="text-right">
-                        <p className="text-base font-bold text-blue-400">{fmtHours(f.duration)}</p>
-                        <p className="text-xs text-slate-500">{f.duration} דק'</p>
-                      </div>
-                      <button
-                        onClick={() => setConfirmId(f.id)}
-                        title="מחיקה"
-                        className="text-slate-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20 mt-0.5"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
