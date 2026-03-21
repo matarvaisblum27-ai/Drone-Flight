@@ -451,8 +451,8 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
           {canManageAdmin && !isFixedAdmin && (
             <div className="flex items-center justify-between bg-slate-700/40 border border-slate-600/40 rounded-lg px-3 py-2.5">
               <div>
-                <p className="text-sm text-white font-medium">הרשאת מנהל</p>
-                <p className="text-xs text-slate-400">גישה לדשבורד מלא</p>
+                <p className="text-sm text-white font-medium">הרשאת צפייה בדשבורד</p>
+                <p className="text-xs text-slate-400">גישה לצפייה בדשבורד</p>
               </div>
               <button
                 onClick={() => setIsAdmin(v => !v)}
@@ -642,16 +642,20 @@ export default function AdminDashboard() {
   const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
-  const [currentUserName, setCurrentUserName] = useState<string>(ADMIN_NAME)
+  const [currentUserName, setCurrentUserName] = useState<string>('')
 
   useEffect(() => {
     fetch('/api/auth/me').then(async r => {
       if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
-      if (!s.isAdmin) { window.location.href = '/'; return }
+      // Allow admin (אורן) and viewers
+      if (!s.isAdmin && !s.isViewer) { window.location.href = '/'; return }
       setCurrentUserName(s.name)
     }).catch(() => { window.location.href = '/' })
   }, [])
+
+  // Only אורן וייסבלום can add/edit/delete data
+  const canEdit = currentUserName === ADMIN_NAME
 
   const fetchDB = useCallback(async () => {
     const res = await fetch('/api/flights', { cache: 'no-store' })
@@ -994,8 +998,16 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-300 hidden sm:block">{currentUserName}</span>
-            <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full">מפקד</span>
-            <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/'))}
+            <span className={`text-xs px-2 py-0.5 rounded-full border ${canEdit ? 'bg-blue-600/20 text-blue-400 border-blue-700/40' : 'bg-purple-600/20 text-purple-400 border-purple-700/40'}`}>
+              {canEdit ? 'מפקד' : 'צפייה'}
+            </span>
+            {!canEdit && (
+              <a href="/pilot"
+                className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
+                דשבורד אישי
+              </a>
+            )}
+            <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location.href = '/')}
               className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
               יציאה
             </button>
@@ -1090,7 +1102,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️' },
             { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋' },
             { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁' },
-          ] as const).map(({ key, label, icon }) => (
+          ] as const).filter(({ key }) => canEdit || key !== 'add').map(({ key, label, icon }) => (
             <button key={key} onClick={() => setActiveTab(key)}
               className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
                 ${activeTab === key ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}>
@@ -1102,23 +1114,25 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-6" onClick={() => setTooltip(null)}>
-            <div className="flex gap-2 justify-end flex-wrap">
-              <button
-                onClick={handleMarkGasDrops}
-                disabled={gasDropMigrating}
-                className="flex items-center gap-2 bg-orange-700/80 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-orange-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
-                סמן הטלות גז היסטוריות
-              </button>
-              <button
-                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
-                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                ייצוא כללי לאקסל ({db.flights.length} טיסות)
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex gap-2 justify-end flex-wrap">
+                <button
+                  onClick={handleMarkGasDrops}
+                  disabled={gasDropMigrating}
+                  className="flex items-center gap-2 bg-orange-700/80 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-orange-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
+                  סמן הטלות גז היסטוריות
+                </button>
+                <button
+                  onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
+                  className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  ייצוא כללי לאקסל ({db.flights.length} טיסות)
+                </button>
+              </div>
+            )}
 
             {/* ── Section 1: Drone Summary ────────────────────────────────── */}
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
@@ -1628,28 +1642,30 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       <td className="px-4 py-3 text-slate-400 text-xs">{f.startTime}–{f.endTime}</td>
                       <td className="px-4 py-3 text-blue-400 font-medium whitespace-nowrap">{fmtHours(f.duration)}</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setEditFlight(f)}
-                            title="עריכה"
-                            className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => setConfirmId(f.id)}
-                            title="מחיקה"
-                            className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
+                        {canEdit && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setEditFlight(f)}
+                              title="עריכה"
+                              className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setConfirmId(f.id)}
+                              title="מחיקה"
+                              className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1662,25 +1678,27 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* PILOTS */}
         {activeTab === 'pilots' && (
           <div className="space-y-5">
-            {/* Top buttons */}
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
-                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                ייצוא כללי
-              </button>
-              <button
-                onClick={() => setEditPilot('add')}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                הוסף טייס חדש
-              </button>
-            </div>
+            {/* Top buttons — admin only */}
+            {canEdit && (
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
+                  className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  ייצוא כללי
+                </button>
+                <button
+                  onClick={() => setEditPilot('add')}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  הוסף טייס חדש
+                </button>
+              </div>
+            )}
 
             {/* Pilots table */}
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
@@ -1693,7 +1711,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['#', 'שם', 'הרשאות', 'רישיון', 'טיסות', 'סה"כ שעות', 'שעות החודש', 'שעות מתחילת השנה', 'טיסה אחרונה', 'ייצוא', 'פעולות'].map(h => (
+                      {['#', 'שם', 'הרשאות', 'רישיון', 'טיסות', 'סה"כ שעות', 'שעות החודש', 'שעות מתחילת השנה', 'טיסה אחרונה', ...(canEdit ? ['ייצוא', 'פעולות'] : [])].map(h => (
                         <th key={h} className="px-5 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -1716,10 +1734,10 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             </div>
                           </td>
                           <td className="px-5 py-4">
-                            {isAdmin ? (
-                              <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">
-                                {p.name === ADMIN_NAME ? 'מפקד ראשי' : 'מנהל'}
-                              </span>
+                            {p.name === ADMIN_NAME ? (
+                              <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">מפקד ראשי</span>
+                            ) : p.isAdmin ? (
+                              <span className="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">צופה</span>
                             ) : (
                               <span className="text-xs text-slate-600">טייס</span>
                             )}
@@ -1732,42 +1750,46 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           <td className="px-5 py-4 text-slate-400">
                             {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                           </td>
-                          <td className="px-5 py-4">
-                            <button
-                              onClick={() => downloadPilotExcel(pFlights, db.pilots, p.name)}
-                              disabled={pFlights.length === 0}
-                              className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                              ייצוא ({pFlights.length})
-                            </button>
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-1.5">
+                          {canEdit && (
+                            <td className="px-5 py-4">
                               <button
-                                onClick={() => setEditPilot(p)}
-                                title="עריכה"
-                                className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
+                                onClick={() => downloadPilotExcel(pFlights, db.pilots, p.name)}
+                                disabled={pFlights.length === 0}
+                                className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                               >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                ייצוא ({pFlights.length})
                               </button>
-                              <button
-                                onClick={() => { if (!isAdmin) setConfirmPilotId(p.id) }}
-                                disabled={isAdmin}
-                                title={isAdmin ? 'לא ניתן למחוק מפקד' : 'מחיקה'}
-                                className={`p-1.5 rounded-lg transition-colors
-                                  ${isAdmin ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-red-400 hover:bg-red-900/20'}`}
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
+                            </td>
+                          )}
+                          {canEdit && (
+                            <td className="px-5 py-4">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => setEditPilot(p)}
+                                  title="עריכה"
+                                  className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => { if (!isAdmin) setConfirmPilotId(p.id) }}
+                                  disabled={isAdmin}
+                                  title={isAdmin ? 'לא ניתן למחוק מפקד' : 'מחיקה'}
+                                  className={`p-1.5 rounded-lg transition-colors
+                                    ${isAdmin ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-red-400 hover:bg-red-900/20'}`}
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -1781,17 +1803,19 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* BATTERIES */}
         {activeTab === 'batteries' && (
           <div className="space-y-5">
-            <div className="flex justify-end">
-              <button
-                onClick={() => setBatteryModal({ battery: null, tailNumber: '' })}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                הוסף סוללה
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setBatteryModal({ battery: null, tailNumber: '' })}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  הוסף סוללה
+                </button>
+              </div>
+            )}
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
@@ -1802,14 +1826,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm" dir="rtl">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['רחפן', 'שם סוללה', 'מחזור', 'תאריך בדיקה', 'פעולות'].map(h => (
+                      {['רחפן', 'שם סוללה', 'מחזור', 'תאריך בדיקה', ...(canEdit ? ['פעולות'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
                     {droneBatteries.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">אין סוללות רשומות במערכת</td></tr>
+                      <tr><td colSpan={canEdit ? 5 : 4} className="px-4 py-8 text-center text-slate-500 text-sm">אין סוללות רשומות במערכת</td></tr>
                     ) : (
                       droneBatteries.map(bat => (
                         <tr key={bat.id} className="hover:bg-slate-700/20 transition-colors">
@@ -1817,24 +1841,26 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           <td className="px-4 py-3 text-white font-medium">{bat.batteryName}</td>
                           <td className="px-4 py-3 text-slate-300 font-mono text-xs">{bat.chargeCycle || '—'}</td>
                           <td className="px-4 py-3 text-slate-400 text-xs">{bat.inspectionDate || '—'}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => setBatteryModal({ battery: bat, tailNumber: bat.droneTailNumber })}
-                                className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
-                                title="עריכה"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                              </button>
-                              <button
-                                onClick={() => setConfirmBatteryId(bat.id)}
-                                className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20"
-                                title="מחיקה"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                              </button>
-                            </div>
-                          </td>
+                          {canEdit && (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => setBatteryModal({ battery: bat, tailNumber: bat.droneTailNumber })}
+                                  className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
+                                  title="עריכה"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                </button>
+                                <button
+                                  onClick={() => setConfirmBatteryId(bat.id)}
+                                  className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20"
+                                  title="מחיקה"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -1848,34 +1874,38 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* DRONES */}
         {activeTab === 'drones' && (
           <div className="space-y-5">
-            <div className="flex justify-end">
-              <button
-                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
-                className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                ייצוא כללי ({db.flights.length} טיסות)
-              </button>
-            </div>
+            {canEdit && (
+              <div className="flex justify-end">
+                <button
+                  onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
+                  className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  ייצוא כללי ({db.flights.length} טיסות)
+                </button>
+              </div>
+            )}
 
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
               <div className="p-5 border-b border-slate-700/50 flex items-center justify-between gap-4">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-blue-400">🚁</span> ניהול רחפנים ({droneDetails.length || DRONES.length})
                 </h2>
-                <button
-                  onClick={() => setEditDroneModal('new')}
-                  className="flex items-center gap-1.5 text-sm text-white bg-green-700/80 hover:bg-green-600 border border-green-600/50 px-3 py-2 rounded-xl transition-all font-medium shrink-0"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                  הוסף רחפן חדש
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => setEditDroneModal('new')}
+                    className="flex items-center gap-1.5 text-sm text-white bg-green-700/80 hover:bg-green-600 border border-green-600/50 px-3 py-2 rounded-xl transition-all font-medium shrink-0"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    הוסף רחפן חדש
+                  </button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['דגם', 'מס\' זנב', 'משקל', 'מס\' סידורי (S.N)', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', 'פעולות'].map(h => (
+                      {['דגם', 'מס\' זנב', 'משקל', 'מס\' סידורי (S.N)', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', ...(canEdit ? ['פעולות'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1908,58 +1938,62 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             <td className="px-4 py-3 text-slate-400 text-xs">
                               {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {/* Edit drone */}
-                                <button
-                                  onClick={() => setEditDroneModal(drone)}
-                                  className="text-xs text-slate-300 hover:text-white bg-slate-700/60 hover:bg-slate-600 border border-slate-600/40 px-2.5 py-1.5 rounded-lg transition-all"
-                                  title="עריכה"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                </button>
-                                {/* Delete drone */}
-                                <button
-                                  onClick={() => setConfirmDeleteDroneId(drone.tailNumber)}
-                                  className="text-xs text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2.5 py-1.5 rounded-lg transition-all"
-                                  title="מחיקה"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                </button>
-                                {/* Batteries toggle */}
-                                <button
-                                  onClick={() => setExpandedDrone(isExpanded ? null : drone.tailNumber)}
-                                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${isExpanded ? 'bg-amber-900/40 border-amber-700/50 text-amber-300' : 'bg-slate-700/60 border-slate-600/40 text-slate-300 hover:text-white hover:bg-slate-600'}`}
-                                >
-                                  🔋 {batteries.length > 0 ? `${batteries.length} סטים` : 'סוללות'}
-                                </button>
-                                {/* Excel */}
-                                <button
-                                  onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
-                                  disabled={dFlights.length === 0}
-                                  className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                  XLS
-                                </button>
-                              </div>
-                            </td>
+                            {canEdit && (
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {/* Edit drone */}
+                                  <button
+                                    onClick={() => setEditDroneModal(drone)}
+                                    className="text-xs text-slate-300 hover:text-white bg-slate-700/60 hover:bg-slate-600 border border-slate-600/40 px-2.5 py-1.5 rounded-lg transition-all"
+                                    title="עריכה"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                  </button>
+                                  {/* Delete drone */}
+                                  <button
+                                    onClick={() => setConfirmDeleteDroneId(drone.tailNumber)}
+                                    className="text-xs text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2.5 py-1.5 rounded-lg transition-all"
+                                    title="מחיקה"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                  </button>
+                                  {/* Batteries toggle */}
+                                  <button
+                                    onClick={() => setExpandedDrone(isExpanded ? null : drone.tailNumber)}
+                                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${isExpanded ? 'bg-amber-900/40 border-amber-700/50 text-amber-300' : 'bg-slate-700/60 border-slate-600/40 text-slate-300 hover:text-white hover:bg-slate-600'}`}
+                                  >
+                                    🔋 {batteries.length > 0 ? `${batteries.length} סטים` : 'סוללות'}
+                                  </button>
+                                  {/* Excel */}
+                                  <button
+                                    onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
+                                    disabled={dFlights.length === 0}
+                                    className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                  >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    XLS
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                           {/* Expandable battery rows */}
                           {isExpanded && (
                             <tr key={`${drone.tailNumber}-batteries`} className="bg-slate-900/60 border-b border-slate-700/30">
-                              <td colSpan={8} className="px-6 py-4">
+                              <td colSpan={canEdit ? 8 : 7} className="px-6 py-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <h4 className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
                                     🔋 סוללות — {drone.model} ({drone.tailNumber})
                                   </h4>
-                                  <button
-                                    onClick={() => setBatteryModal({ battery: null, tailNumber: drone.tailNumber })}
-                                    className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-700/40 px-2.5 py-1.5 rounded-lg transition-all"
-                                  >
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                    הוסף סוללה
-                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      onClick={() => setBatteryModal({ battery: null, tailNumber: drone.tailNumber })}
+                                      className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-700/40 px-2.5 py-1.5 rounded-lg transition-all"
+                                    >
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                      הוסף סוללה
+                                    </button>
+                                  )}
                                 </div>
                                 {batteries.length === 0 ? (
                                   <p className="text-xs text-slate-500 py-2">אין סוללות רשומות לרחפן זה</p>
@@ -1970,7 +2004,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                         <th className="pb-2 font-medium">שם סוללה</th>
                                         <th className="pb-2 font-medium">מחזור</th>
                                         <th className="pb-2 font-medium">תאריך בדיקה</th>
-                                        <th className="pb-2 font-medium"></th>
+                                        {canEdit && <th className="pb-2 font-medium"></th>}
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-700/30">
@@ -1979,22 +2013,24 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                           <td className="py-2 font-medium text-white">{bat.batteryName}</td>
                                           <td className="py-2 text-slate-300 font-mono">{bat.chargeCycle || '—'}</td>
                                           <td className="py-2 text-slate-400">{bat.inspectionDate || '—'}</td>
-                                          <td className="py-2">
-                                            <div className="flex gap-1.5 justify-end">
-                                              <button
-                                                onClick={() => setBatteryModal({ battery: bat, tailNumber: drone.tailNumber })}
-                                                className="text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-600 px-2 py-1 rounded transition-all"
-                                              >
-                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                              </button>
-                                              <button
-                                                onClick={() => setConfirmBatteryId(bat.id)}
-                                                className="text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 px-2 py-1 rounded transition-all"
-                                              >
-                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                              </button>
-                                            </div>
-                                          </td>
+                                          {canEdit && (
+                                            <td className="py-2">
+                                              <div className="flex gap-1.5 justify-end">
+                                                <button
+                                                  onClick={() => setBatteryModal({ battery: bat, tailNumber: drone.tailNumber })}
+                                                  className="text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-600 px-2 py-1 rounded transition-all"
+                                                >
+                                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                </button>
+                                                <button
+                                                  onClick={() => setConfirmBatteryId(bat.id)}
+                                                  className="text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 px-2 py-1 rounded transition-all"
+                                                >
+                                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                </button>
+                                              </div>
+                                            </td>
+                                          )}
                                         </tr>
                                       ))}
                                     </tbody>
