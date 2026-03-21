@@ -76,6 +76,10 @@ function groupMissions(flights: Flight[]): MissionData[] {
   })
 }
 
+// Columns: label/tail, date, missionName, battalion, p1name, p1license, p2name, p2license, observer
+//   then per-flight sub-rows: #, startTime, endTime, pilotName, license, battery, duration, observer, gasDropped, eventNumber
+const MISSION_COL_COUNT = 10
+
 function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel: (m: MissionData) => string): (string | number)[][] {
   const pilotMap = new Map(pilots.map(p => [p.id, p]))
   const rows: (string | number)[][] = []
@@ -86,21 +90,23 @@ function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel
     const pilot2 = uniquePilotIds[1] ? pilotMap.get(uniquePilotIds[1]) : undefined
     const observer = mission.flights.find(f => f.observer)?.observer ?? ''
     const battalion = mission.flights.find(f => f.battalion)?.battalion ?? ''
-    rows.push([headerLabel(mission), date, mission.missionName, battalion, pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer])
-    rows.push(['', 'שעת התחלה', 'שעת סיום', 'שם מטיס', 'רישוי מטיס', 'סוללה', "סה\"כ דק' טיסה"])
+    // Mission header row
+    rows.push([headerLabel(mission), date, mission.missionName, battalion, pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer, ''])
+    // Per-flight column headers
+    rows.push(['', 'שעת התחלה', 'שעת סיום', 'שם מטיס', 'רישוי מטיס', 'סוללה', "סה\"כ דק' טיסה", 'תצפיתן', 'הטלת גז', 'מספר אירוע'])
     for (let i = 0; i < MAX_FLIGHTS_PER_MISSION; i++) {
       const f = mission.flights[i]
       if (f) {
         const p = pilotMap.get(f.pilotId)
-        rows.push([i + 1, f.startTime, f.endTime, f.pilotName, p?.license ?? '', f.battery, fmtDuration(f.duration)])
+        rows.push([i + 1, f.startTime, f.endTime, f.pilotName, p?.license ?? '', f.battery, fmtDuration(f.duration), f.observer ?? '', f.gasDropped ? 'כן' : '', f.eventNumber ?? ''])
       } else {
-        rows.push([i + 1, '', '', '', '', '', '0:00:00'])
+        rows.push([i + 1, '', '', '', '', '', '0:00:00', '', '', ''])
       }
     }
-    rows.push(["סה\"כ למשימה", '', '', '', '', '', fmtDuration(mission.missionTotal)])
-    rows.push(["סיכום מדף קודם", '', '', '', '', '', fmtDuration(mission.prevCumulative)])
-    rows.push(["סה\"כ מצטבר", '', '', '', '', '', fmtDuration(mission.cumulative)])
-    rows.push(Array(7).fill(''))
+    rows.push(["סה\"כ למשימה", '', '', '', '', '', fmtDuration(mission.missionTotal), '', '', ''])
+    rows.push(["סיכום מדף קודם", '', '', '', '', '', fmtDuration(mission.prevCumulative), '', '', ''])
+    rows.push(["סה\"כ מצטבר", '', '', '', '', '', fmtDuration(mission.cumulative), '', '', ''])
+    rows.push(Array(MISSION_COL_COUNT).fill(''))
   }
   return rows
 }
@@ -114,7 +120,7 @@ async function downloadDroneExcel(flights: Flight[], pilots: Pilot[], tailNumber
     const mm = missions.filter(x => x.month === m)
     if (!mm.length) continue
     const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(mm, pilots, () => tailNumber))
-    ws['!cols'] = Array(7).fill({ wch: 16 })
+    ws['!cols'] = Array(MISSION_COL_COUNT).fill({ wch: 16 })
     XLSX.utils.book_append_sheet(wb, ws, HEBREW_MONTHS[m])
   }
   if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
@@ -130,7 +136,7 @@ async function downloadPilotExcel(flights: Flight[], pilots: Pilot[], pilotName:
     const mm = missions.filter(x => x.month === m)
     if (!mm.length) continue
     const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(mm, pilots, x => x.flights[0].tailNumber))
-    ws['!cols'] = Array(7).fill({ wch: 16 })
+    ws['!cols'] = Array(MISSION_COL_COUNT).fill({ wch: 16 })
     XLSX.utils.book_append_sheet(wb, ws, HEBREW_MONTHS[m])
   }
   if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
@@ -149,7 +155,7 @@ async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[], gasDrops
     const mf = flights.filter(f => tails.includes(f.tailNumber))
     if (!mf.length) continue
     const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(groupMissions(mf), pilots, x => x.flights[0].tailNumber))
-    ws['!cols'] = Array(7).fill({ wch: 16 })
+    ws['!cols'] = Array(MISSION_COL_COUNT).fill({ wch: 16 })
     XLSX.utils.book_append_sheet(wb, ws, drone.model)
   }
   // Combine gas drops from flights (gas_dropped=true) + standalone gas_drops table
@@ -170,7 +176,7 @@ async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[], gasDrops
   const practiceFlights = flights.filter(f => f.missionName.includes('תרגול'))
   if (practiceFlights.length) {
     const ws = XLSX.utils.aoa_to_sheet(buildMissionSheet(groupMissions(practiceFlights), pilots, x => x.flights[0].tailNumber))
-    ws['!cols'] = Array(7).fill({ wch: 16 })
+    ws['!cols'] = Array(MISSION_COL_COUNT).fill({ wch: 16 })
     XLSX.utils.book_append_sheet(wb, ws, 'תרגול חודשי')
   }
   if (!wb.SheetNames.length) { alert('אין נתונים לייצוא'); return }
