@@ -45,16 +45,19 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed, password }),
       })
-      let data: { ok?: boolean; isAdmin?: boolean; error?: string } = {}
+      let data: { ok?: boolean; isAdmin?: boolean; isViewer?: boolean; error?: string } = {}
       try { data = await res.json() } catch { /* non-JSON response */ }
+      console.log('[login page] API response:', { status: res.status, isAdmin: data.isAdmin, isViewer: data.isViewer, ok: data.ok })
       if (!res.ok) {
         setError(data.error === 'invalid_credentials' ? 'שם משתמש או סיסמה שגויים' : `שגיאת שרת (${res.status})`)
         return
       }
+      const dest = (data.isAdmin || data.isViewer) ? '/admin' : '/pilot'
+      console.log('[login page] redirecting to:', dest, '(isAdmin:', data.isAdmin, 'isViewer:', data.isViewer, ')')
       // Full page navigation ensures the httpOnly cookie is committed by the
       // browser before the next request fires (router.push uses RSC fetch which
       // can race against Set-Cookie processing).
-      window.location.href = data.isAdmin ? '/admin' : '/pilot'
+      window.location.href = dest
     } catch {
       setError('שגיאת רשת — בדוק חיבור לאינטרנט ונסה שוב')
     } finally {

@@ -64,6 +64,9 @@ export async function POST(req: NextRequest) {
     const isAdmin = pilot.name === ADMIN_NAME                          // ONLY אורן
     const isViewer = !isAdmin && pilot.is_admin === true               // granted "הרשאת סגן"
 
+    console.log('[login] pilot DB data:', { name: pilot.name, is_admin: pilot.is_admin })
+    console.log('[login] computed permissions:', { isAdmin, isViewer })
+
     const token = await signSession({ pilotId: pilot.id, name: pilot.name, isAdmin, isViewer })
 
     const res = NextResponse.json({ ok: true, name: pilot.name, isAdmin, isViewer })

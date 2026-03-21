@@ -74,10 +74,19 @@ export async function PUT(req: NextRequest) {
     const { verifySession, COOKIE_NAME } = await import('@/lib/auth')
     const token = req.cookies.get(COOKIE_NAME)?.value
     const session = token ? await verifySession(token) : null
+    console.log('[PUT /api/pilots] is_admin change requested:', {
+      targetPilot: existing.name,
+      requestedIsAdmin: body.isAdmin,
+      callerName: session?.name ?? '(no session)',
+      callerIsAdmin: session?.name === ADMIN_NAME,
+      hasToken: !!token,
+    })
     if (session?.name === ADMIN_NAME) {
       updates.is_admin = !!body.isAdmin
+      console.log('[PUT /api/pilots] is_admin will be set to:', updates.is_admin)
+    } else {
+      console.log('[PUT /api/pilots] BLOCKED — caller is not admin. is_admin NOT changed.')
     }
-    // silently ignore the field if caller is not אורן
   }
 
   // Password reset by admin
@@ -85,12 +94,14 @@ export async function PUT(req: NextRequest) {
     updates.password_hash = await bcrypt.hash(body.newPassword, 12)
   }
 
+  console.log('[PUT /api/pilots] final updates object:', updates)
   const { data, error } = await supabase
     .from('pilots')
     .update(updates)
     .eq('id', body.id)
     .select('id, name, license, is_admin')
     .single()
+  console.log('[PUT /api/pilots] Supabase result:', { data: data ? { name: data.name, is_admin: data.is_admin } : null, error: error?.message })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   if (existing.name !== name) {

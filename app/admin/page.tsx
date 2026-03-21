@@ -648,8 +648,10 @@ export default function AdminDashboard() {
 
   const checkPermissions = useCallback(async () => {
     try {
-      // /api/auth/check reads is_admin FRESH from Supabase on every call — no JWT cache
-      const r = await fetch('/api/auth/check', {
+      // /api/auth/me reads is_admin FRESH from Supabase AND refreshes the JWT so
+      // אורן's session never expires while on the page (keeps PUT /api/pilots working).
+      // cache:'no-store' + server Cache-Control:no-store prevents any browser caching.
+      const r = await fetch('/api/auth/me', {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       })

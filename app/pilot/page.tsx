@@ -145,8 +145,8 @@ export default function PilotDashboard() {
   const [showChangePwd, setShowChangePwd] = useState(false)
 
   useEffect(() => {
-    // /api/auth/check reads is_admin FRESH from Supabase — no JWT cache
-    fetch('/api/auth/check', {
+    // /api/auth/me reads is_admin FRESH from DB AND refreshes the JWT
+    fetch('/api/auth/me', {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     }).then(async r => {
