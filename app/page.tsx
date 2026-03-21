@@ -45,14 +45,15 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed, password }),
       })
-      const data = await res.json()
+      let data: { ok?: boolean; isAdmin?: boolean; error?: string } = {}
+      try { data = await res.json() } catch { /* non-JSON response */ }
       if (!res.ok) {
-        setError(data.error === 'invalid_credentials' ? 'סיסמה שגויה' : 'שגיאת התחברות')
+        setError(data.error === 'invalid_credentials' ? 'שם משתמש או סיסמה שגויים' : `שגיאת שרת (${res.status})`)
         return
       }
       router.push(data.isAdmin ? '/admin' : '/pilot')
     } catch {
-      setError('שגיאת רשת — נסה שוב')
+      setError('שגיאת רשת — בדוק חיבור לאינטרנט ונסה שוב')
     } finally {
       setSubmitting(false)
     }
