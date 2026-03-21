@@ -539,7 +539,8 @@ export default function AdminDashboard() {
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
-  const [summaryMode, setSummaryMode] = useState<'monthly' | 'yearly'>('monthly') // kept for potential future use
+  const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
+  const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
   const [editFlight, setEditFlight] = useState<Flight | null>(null)
@@ -619,7 +620,24 @@ export default function AdminDashboard() {
     if (f.date.startsWith(thisMonth) && pilotMonthlyFlew[f.pilotId]) pilotMonthlyFlew[f.pilotId].add(model)
   })
 
-  void summaryMode // suppress unused warning
+  // Last date each pilot flew each model (all-time & this month)
+  const pilotLastFlewModel: Record<string, Record<string, string>> = {}
+  const pilotLastMonthFlewModel: Record<string, Record<string, string>> = {}
+  db.pilots.forEach(p => { pilotLastFlewModel[p.id] = {}; pilotLastMonthFlewModel[p.id] = {} })
+  db.flights.forEach(f => {
+    const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+    if (!model) return
+    if (pilotLastFlewModel[f.pilotId]) {
+      const cur = pilotLastFlewModel[f.pilotId][model]
+      if (!cur || f.date > cur) pilotLastFlewModel[f.pilotId][model] = f.date
+    }
+    if (f.date.startsWith(thisMonth) && pilotLastMonthFlewModel[f.pilotId]) {
+      const cur = pilotLastMonthFlewModel[f.pilotId][model]
+      if (!cur || f.date > cur) pilotLastMonthFlewModel[f.pilotId][model] = f.date
+    }
+  })
+  const maxDroneMins = Math.max(...DRONES.map(d => droneTotalMins[d.tailNumber] ?? 0), 1)
+
 
   const handleAddFlight = async () => {
     setAddError(''); setAddSuccess('')
@@ -895,7 +913,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-6" onClick={() => setTooltip(null)}>
             <div className="flex gap-2 justify-end flex-wrap">
               <button
                 onClick={handleMarkGasDrops}
@@ -914,14 +932,52 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </button>
             </div>
 
-            {/* Section 1: Drone Summary */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            {/* ── Section 1: Drone Summary ────────────────────────────────── */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span>🚁</span> סיכום רחפנים
                 </h2>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* Mobile: cards */}
+              <div className="sm:hidden p-4 grid grid-cols-2 gap-3" dir="rtl">
+                {DRONES.map(drone => {
+                  const totalMins = droneTotalMins[drone.tailNumber] ?? 0
+                  const pct = totalMins / maxDroneMins
+                  const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
+                  const lastGasDrop = isGas
+                    ? gasDrops.filter(g => g.tailNumber === drone.tailNumber).sort((a, b) => b.date.localeCompare(a.date))[0]
+                    : null
+                  const barColor = pct > 0.66 ? 'from-cyan-500 to-blue-400' : pct > 0.33 ? 'from-blue-500 to-blue-600' : pct > 0 ? 'from-blue-700 to-slate-500' : 'from-slate-700 to-slate-600'
+                  const hoursColor = pct > 0.66 ? 'text-cyan-400' : pct > 0.33 ? 'text-blue-400' : pct > 0 ? 'text-blue-500' : 'text-slate-500'
+                  const borderColor = pct > 0.66 ? 'border-cyan-500/30' : pct > 0.33 ? 'border-blue-500/30' : pct > 0 ? 'border-blue-800/30' : 'border-slate-600/30'
+                  return (
+                    <div key={drone.tailNumber} className={`bg-slate-700/40 border ${borderColor} rounded-xl p-4 transition-all`}>
+                      <p className="text-xs font-semibold text-white mb-0.5 leading-tight">{drone.model}</p>
+                      <p className="text-[10px] font-mono text-slate-500 mb-3">{drone.tailNumber}</p>
+                      <div className="h-1.5 bg-slate-600/50 rounded-full overflow-hidden mb-2">
+                        <div
+                          className={`h-full bg-gradient-to-l ${barColor} rounded-full transition-all duration-700`}
+                          style={{ width: `${totalMins > 0 ? Math.max(pct * 100, 5) : 0}%` }}
+                        />
+                      </div>
+                      <p className={`text-base font-bold ${hoursColor}`}>{totalMins ? fmtHours(totalMins) : '—'}</p>
+                      {isGas && (
+                        <div className="mt-2 pt-2 border-t border-slate-600/40">
+                          <p className="text-[10px] text-slate-400">הטלה אחרונה</p>
+                          <p className={`text-xs font-semibold ${lastGasDrop ? 'text-green-400' : 'text-slate-500'}`}>
+                            {lastGasDrop ? new Date(lastGasDrop.date).toLocaleDateString('he-IL') : '—'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table dir="rtl" className="w-full">
                   <thead>
                     <tr className="bg-slate-700/30">
@@ -948,8 +1004,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                               ? lastGasDrop
                                 ? <span className="text-green-400">{new Date(lastGasDrop.date).toLocaleDateString('he-IL')}</span>
                                 : <span className="text-slate-500">—</span>
-                              : <span className="text-slate-600 text-xs">—</span>
-                            }
+                              : <span className="text-slate-600 text-xs">—</span>}
                           </td>
                         </tr>
                       )
@@ -959,14 +1014,140 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </div>
             </div>
 
-            {/* Section 2: Pilot Training Matrix */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            {/* ── Section 2: Pilot Training Matrix ───────────────────────── */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span>🎓</span> סיכום אימוני טייסים
                 </h2>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* Mobile: expandable pilot cards */}
+              <div className="sm:hidden divide-y divide-slate-700/30" dir="rtl">
+                {db.pilots.map(pilot => {
+                  const isExpanded = expandedPilot === pilot.id
+                  const monthlyCount = MATRIX_MODELS.filter(m => pilotMonthlyFlew[pilot.id]?.has(m)).length
+                  return (
+                    <div key={pilot.id}>
+                      {/* Pilot header row */}
+                      <button
+                        onClick={e => { e.stopPropagation(); setExpandedPilot(isExpanded ? null : pilot.id); setTooltip(null) }}
+                        className="w-full px-5 py-4 flex items-center justify-between active:bg-slate-700/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-blue-600/20 border border-blue-700/40 flex items-center justify-center text-sm font-bold text-blue-400 shrink-0">
+                            {pilot.name[0]}
+                          </div>
+                          <span className="font-medium text-white text-sm">{pilot.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            monthlyCount === MATRIX_MODELS.length ? 'bg-green-900/50 text-green-400 border border-green-700/40'
+                            : monthlyCount > 0 ? 'bg-amber-900/50 text-amber-400 border border-amber-700/40'
+                            : 'bg-red-900/50 text-red-400 border border-red-700/40'
+                          }`}>
+                            {monthlyCount}/{MATRIX_MODELS.length} החודש
+                          </span>
+                          <svg
+                            className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </button>
+
+                      {/* Expandable content */}
+                      <div
+                        className="overflow-hidden transition-all duration-300 ease-in-out"
+                        style={{ maxHeight: isExpanded ? '800px' : '0px', opacity: isExpanded ? 1 : 0 }}
+                      >
+                        <div className="px-4 pb-5 space-y-4">
+
+                          {/* Info bar — shows tooltip details */}
+                          {tooltip?.pilotId === pilot.id && (
+                            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs animate-in fade-in duration-150 ${
+                              tooltip.type === 'monthly'
+                                ? 'bg-amber-900/30 border border-amber-700/40 text-amber-100'
+                                : 'bg-slate-700/60 border border-slate-600/40 text-slate-100'
+                            }`}>
+                              <span className="font-semibold shrink-0">{tooltip.model}</span>
+                              <span className="text-slate-400">·</span>
+                              <span className="flex-1">
+                                {tooltip.type === 'ever'
+                                  ? (pilotEverFlew[pilot.id]?.has(tooltip.model)
+                                    ? `אימון אחרון: ${new Date(pilotLastFlewModel[pilot.id]?.[tooltip.model]).toLocaleDateString('he-IL')}`
+                                    : 'לא בוצע אימון מעולם')
+                                  : (pilotMonthlyFlew[pilot.id]?.has(tooltip.model)
+                                    ? `בוצע ב‑${new Date(pilotLastMonthFlewModel[pilot.id]?.[tooltip.model]).toLocaleDateString('he-IL')}`
+                                    : 'לא בוצע אימון החודש')}
+                              </span>
+                              <button
+                                onClick={e => { e.stopPropagation(); setTooltip(null) }}
+                                className="text-slate-400 hover:text-white transition-colors shrink-0 text-base leading-none"
+                              >✕</button>
+                            </div>
+                          )}
+
+                          {/* כשירות כללית */}
+                          <div>
+                            <p className="text-xs font-medium text-slate-400 mb-3">כשירות כללית</p>
+                            <div className="flex flex-wrap gap-3">
+                              {MATRIX_MODELS.map(model => {
+                                const flew = pilotEverFlew[pilot.id]?.has(model)
+                                const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'ever'
+                                return (
+                                  <button
+                                    key={model}
+                                    onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'ever' }) }}
+                                    className="flex flex-col items-center gap-1.5 transition-transform active:scale-90"
+                                  >
+                                    <div className={`w-11 h-11 rounded-full flex items-center justify-center border-2 transition-all ${
+                                      flew ? 'bg-green-500/20 border-green-500' : 'bg-red-500/10 border-red-500/60'
+                                    } ${isActive ? 'ring-2 ring-offset-1 ring-offset-slate-800 ring-white/40 scale-110' : ''}`}>
+                                      <span className={`w-5 h-5 rounded-full ${flew ? 'bg-green-500' : 'bg-red-500/70'}`} />
+                                    </div>
+                                    <span className="text-[10px] text-slate-500 text-center w-12 leading-tight">{model}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* אימון חודשי */}
+                          <div className="bg-amber-900/10 rounded-xl p-4 border border-amber-600/20">
+                            <p className="text-xs font-medium text-amber-400/90 mb-3">אימון חודשי</p>
+                            <div className="flex flex-wrap gap-3">
+                              {MATRIX_MODELS.map(model => {
+                                const flew = pilotMonthlyFlew[pilot.id]?.has(model)
+                                const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'monthly'
+                                return (
+                                  <button
+                                    key={model}
+                                    onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'monthly' }) }}
+                                    className="flex flex-col items-center gap-1.5 transition-transform active:scale-90"
+                                  >
+                                    <div className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all ${
+                                      flew ? 'bg-green-500/20 border-green-500' : 'bg-red-500/10 border-red-500/60'
+                                    } ${isActive ? 'ring-2 ring-offset-1 ring-offset-slate-800 ring-white/40 scale-110' : ''}`}>
+                                      <span className={`w-7 h-7 rounded-full ${flew ? 'bg-green-500' : 'bg-red-500/70'}`} />
+                                    </div>
+                                    <span className="text-[10px] text-slate-500 text-center w-14 leading-tight">{model}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Desktop: matrix table */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table dir="rtl" className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30">
@@ -987,16 +1168,50 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     {db.pilots.map(pilot => (
                       <tr key={pilot.id} className="hover:bg-slate-700/20 transition-colors">
                         <td className="px-5 py-3 font-medium text-white whitespace-nowrap">{pilot.name}</td>
-                        {MATRIX_MODELS.map(model => (
-                          <td key={`e-${model}`} className="text-center py-3">
-                            <span className={`inline-block w-3 h-3 rounded-full ${pilotEverFlew[pilot.id]?.has(model) ? 'bg-green-500' : 'bg-red-500/70'}`} />
-                          </td>
-                        ))}
-                        {MATRIX_MODELS.map((model, idx) => (
-                          <td key={`m-${model}`} className={`text-center py-3 ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>
-                            <span className={`inline-block w-3 h-3 rounded-full ${pilotMonthlyFlew[pilot.id]?.has(model) ? 'bg-green-500' : 'bg-red-500/70'}`} />
-                          </td>
-                        ))}
+                        {MATRIX_MODELS.map(model => {
+                          const flew = pilotEverFlew[pilot.id]?.has(model)
+                          const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'ever'
+                          return (
+                            <td key={`e-${model}`} className="text-center py-3">
+                              <div className="relative inline-flex justify-center" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'ever' }) }}
+                                  className={`w-5 h-5 rounded-full transition-all hover:scale-125 ${flew ? 'bg-green-500 hover:bg-green-400' : 'bg-red-500/70 hover:bg-red-400/70'}`}
+                                />
+                                {isActive && (
+                                  <div className="absolute top-full mt-2 z-20 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white whitespace-nowrap shadow-xl pointer-events-none">
+                                    {flew
+                                      ? `אימון אחרון: ${new Date(pilotLastFlewModel[pilot.id]?.[model]).toLocaleDateString('he-IL')}`
+                                      : 'לא בוצע אימון מעולם'}
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-slate-600" />
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          )
+                        })}
+                        {MATRIX_MODELS.map((model, idx) => {
+                          const flew = pilotMonthlyFlew[pilot.id]?.has(model)
+                          const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'monthly'
+                          return (
+                            <td key={`m-${model}`} className={`text-center py-3 ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>
+                              <div className="relative inline-flex justify-center" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'monthly' }) }}
+                                  className={`w-5 h-5 rounded-full transition-all hover:scale-125 ${flew ? 'bg-green-500 hover:bg-green-400' : 'bg-red-500/70 hover:bg-red-400/70'}`}
+                                />
+                                {isActive && (
+                                  <div className="absolute top-full mt-2 z-20 bg-amber-900/90 border border-amber-700/60 rounded-lg px-3 py-2 text-xs text-amber-100 whitespace-nowrap shadow-xl pointer-events-none">
+                                    {flew
+                                      ? `בוצע ב‑${new Date(pilotLastMonthFlewModel[pilot.id]?.[model]).toLocaleDateString('he-IL')}`
+                                      : 'לא בוצע אימון החודש'}
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-amber-700/60" />
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          )
+                        })}
                       </tr>
                     ))}
                   </tbody>
