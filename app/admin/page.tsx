@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery } from '@/lib/types'
+import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 
 const ADMIN_NAME = 'אורן וייסבלום'
@@ -121,7 +121,7 @@ async function downloadPilotExcel(flights: Flight[], pilots: Pilot[], pilotName:
   XLSX.writeFile(wb, `${pilotName}_logbook.xlsx`)
 }
 
-async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[]) {
+async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[], gasDrops: GasDrop[] = []) {
   if (!flights.length) { alert('אין נתונים לייצוא'); return }
   const XLSX = await import('xlsx')
   const wb = XLSX.utils.book_new()
@@ -136,10 +136,17 @@ async function downloadGeneralExcel(flights: Flight[], pilots: Pilot[]) {
     ws['!cols'] = Array(9).fill({ wch: 16 })
     XLSX.utils.book_append_sheet(wb, ws, drone.model)
   }
-  const gasFlights = [...flights].filter(f => f.gasDropped).sort((a, b) => a.date.localeCompare(b.date))
-  if (gasFlights.length) {
+  // Combine gas drops from flights (gas_dropped=true) + standalone gas_drops table
+  const gasFromFlights = [...flights].filter(f => f.gasDropped).map(f => ({
+    date: f.date, tailNumber: f.tailNumber, missionName: f.missionName, pilotName: f.pilotName, gasDropTime: f.gasDropTime ?? ''
+  }))
+  const gasStandalone = gasDrops.map(g => ({
+    date: g.date, tailNumber: g.tailNumber, missionName: '—', pilotName: g.pilotName, gasDropTime: g.gasDropTime ?? ''
+  }))
+  const allGasRows = [...gasFromFlights, ...gasStandalone].sort((a, b) => a.date.localeCompare(b.date))
+  if (allGasRows.length) {
     const gasRows: (string | number)[][] = [["תאריך", "מס' זנב", "משימה", "שם מטיס", "שעת הטלה"]]
-    for (const f of gasFlights) gasRows.push([new Date(f.date).toLocaleDateString('he-IL'), f.tailNumber, f.missionName, f.pilotName, f.gasDropTime ?? ''])
+    for (const r of allGasRows) gasRows.push([new Date(r.date).toLocaleDateString('he-IL'), r.tailNumber, r.missionName, r.pilotName, r.gasDropTime])
     const ws = XLSX.utils.aoa_to_sheet(gasRows)
     ws['!cols'] = Array(5).fill({ wch: 18 })
     XLSX.utils.book_append_sheet(wb, ws, 'הטלות גז')
@@ -529,6 +536,8 @@ export default function AdminDashboard() {
   const [editDroneModal, setEditDroneModal] = useState<DroneInfo | null>(null)
   const [batteryModal, setBatteryModal] = useState<{ battery: DroneBattery | null; tailNumber: string } | null>(null)
   const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
+  const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
+  const [gasDropMigrating, setGasDropMigrating] = useState(false)
 
   useEffect(() => {
     const user = sessionStorage.getItem('currentUser')
@@ -549,8 +558,14 @@ export default function AdminDashboard() {
     if (batteriesRes.ok) setDroneBatteries(await batteriesRes.json())
   }, [])
 
+  const fetchGasDrops = useCallback(async () => {
+    const res = await fetch('/api/gas-drops', { cache: 'no-store' })
+    if (res.ok) setGasDrops(await res.json())
+  }, [])
+
   useEffect(() => { fetchDB() }, [fetchDB])
   useEffect(() => { fetchDroneData() }, [fetchDroneData])
+  useEffect(() => { fetchGasDrops() }, [fetchGasDrops])
 
   if (!db) {
     return (
@@ -695,6 +710,17 @@ export default function AdminDashboard() {
     if (!res.ok) { alert('שגיאה במחיקת סוללה'); return }
     setConfirmBatteryId(null)
     fetchDroneData()
+  }
+
+  const handleMarkGasDrops = async () => {
+    setGasDropMigrating(true)
+    const res = await fetch('/api/admin/mark-gas-drops', { method: 'POST' })
+    setGasDropMigrating(false)
+    if (!res.ok) { alert('שגיאה בעדכון הטלות גז'); return }
+    const { summary } = await res.json()
+    alert(`עדכון הטלות גז:\n✅ ${summary.updated} טיסות עודכנו\n➕ ${summary.added} רשומות עצמאיות נוספו\n⏭ ${summary.skipped} כבר קיימות\n❌ ${summary.errors} שגיאות`)
+    fetchDB()
+    fetchGasDrops()
   }
 
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
@@ -847,9 +873,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-          <div className="flex justify-end">
+          <div className="flex gap-2 justify-end flex-wrap">
             <button
-              onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
+              onClick={handleMarkGasDrops}
+              disabled={gasDropMigrating}
+              className="flex items-center gap-2 bg-orange-700/80 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-orange-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
+              סמן הטלות גז היסטוריות
+            </button>
+            <button
+              onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
               className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -1153,7 +1187,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             {/* Top buttons */}
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
+                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
                 className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -1265,7 +1299,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           <div className="space-y-5">
             <div className="flex justify-end">
               <button
-                onClick={() => downloadGeneralExcel(db.flights, db.pilots)}
+                onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
                 className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-emerald-600/50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>

@@ -45,6 +45,15 @@ export interface DroneInfo {
   extraRegistration: string | null
 }
 
+export interface GasDrop {
+  id: string
+  pilotName: string
+  date: string
+  tailNumber: string
+  gasDropTime: string
+  notes: string
+}
+
 export interface DroneBattery {
   id: string
   droneTailNumber: string
