@@ -44,8 +44,11 @@ export async function GET() {
   const batteries: Record<string, number> = {}
   for (const row of batteriesRes.data) batteries[row.label] = row.percentage
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapPilot = (row: any) => ({ id: row.id, name: row.name, license: row.license, isAdmin: row.is_admin ?? false })
+
   const db: FlightDB = {
-    pilots:          pilotsRes.data,
+    pilots:          pilotsRes.data.map(mapPilot),
     flights:         flightsRes.data.map(rowToFlight),
     batteries,
     migrationNeeded: !migrated,
