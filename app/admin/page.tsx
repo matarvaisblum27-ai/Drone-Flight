@@ -645,12 +645,12 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetch('/api/auth/me').then(async r => {
-      if (!r.ok) { router.replace('/'); return }
+      if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
-      if (!s.isAdmin) { router.replace('/'); return }
+      if (!s.isAdmin) { window.location.href = '/'; return }
       setCurrentUserName(s.name)
-    }).catch(() => router.replace('/'))
-  }, [router])
+    }).catch(() => { window.location.href = '/' })
+  }, [])
 
   const fetchDB = useCallback(async () => {
     const res = await fetch('/api/flights', { cache: 'no-store' })

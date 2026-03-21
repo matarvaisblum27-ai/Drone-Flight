@@ -146,12 +146,12 @@ export default function PilotDashboard() {
 
   useEffect(() => {
     fetch('/api/auth/me').then(async r => {
-      if (!r.ok) { router.replace('/'); return }
+      if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
-      if (s.isAdmin) { router.replace('/admin'); return }
+      if (s.isAdmin) { window.location.href = '/admin'; return }
       setUserName(s.name)
-    }).catch(() => router.replace('/'))
-  }, [router])
+    }).catch(() => { window.location.href = '/' })
+  }, [])
 
   const fetchDB = useCallback(async () => {
     const res = await fetch('/api/flights')

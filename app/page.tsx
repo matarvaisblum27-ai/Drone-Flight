@@ -51,7 +51,10 @@ export default function LoginPage() {
         setError(data.error === 'invalid_credentials' ? 'שם משתמש או סיסמה שגויים' : `שגיאת שרת (${res.status})`)
         return
       }
-      router.push(data.isAdmin ? '/admin' : '/pilot')
+      // Full page navigation ensures the httpOnly cookie is committed by the
+      // browser before the next request fires (router.push uses RSC fetch which
+      // can race against Set-Cookie processing).
+      window.location.href = data.isAdmin ? '/admin' : '/pilot'
     } catch {
       setError('שגיאת רשת — בדוק חיבור לאינטרנט ונסה שוב')
     } finally {
