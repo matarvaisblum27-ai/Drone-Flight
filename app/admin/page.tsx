@@ -218,12 +218,13 @@ type EditForm = {
   observer: string; gasDropped: boolean; eventNumber: string
 }
 
-function EditModal({ flight, db, onSave, onCancel, drones }: {
+function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
   flight: Flight
   db: FlightDB
   onSave: (updated: EditForm) => void
   onCancel: () => void
   drones?: DroneInfo[]
+  batteries?: DroneBattery[]
 }) {
   const [form, setForm] = useState<EditForm>({
     pilotId:     flight.pilotId,
@@ -243,6 +244,8 @@ function EditModal({ flight, db, onSave, onCancel, drones }: {
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
+  const availableBatteries = (batteries ?? []).filter(b => b.droneTailNumber === form.tailNumber)
+  const noBatteries = availableBatteries.length === 0
 
   const handleSave = () => {
     const { date, pilotId } = form
@@ -286,15 +289,29 @@ function EditModal({ flight, db, onSave, onCancel, drones }: {
           </div>
           <div>
             <label className={labelCls}>מספר זנב</label>
-            <select value={form.tailNumber} onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
+            <select value={form.tailNumber}
+              onChange={e => setForm(f => {
+                const newTail = e.target.value
+                const batsForNew = (batteries ?? []).filter(b => b.droneTailNumber === newTail)
+                const keepBattery = batsForNew.some(b => b.batteryName === f.battery)
+                return { ...f, tailNumber: newTail, battery: keepBattery ? f.battery : '' }
+              })}
+              className={inputCls}>
               {(drones ?? DRONES).map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
             </select>
           </div>
           <div>
             <label className={labelCls}>סוללה</label>
-            <input type="text" value={form.battery}
-              onChange={e => setForm(f => ({ ...f, battery: e.target.value }))}
-              placeholder="שם הסוללה..." className={inputCls} />
+            {noBatteries ? (
+              <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
+                <option>אין סוללות רשומות לרחפן זה</option>
+              </select>
+            ) : (
+              <select value={form.battery} onChange={e => setForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
+                <option value="">— בחר סוללה —</option>
+                {availableBatteries.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+              </select>
+            )}
           </div>
           <div>
             <label className={labelCls}>שעת המראה</label>
@@ -823,6 +840,7 @@ export default function AdminDashboard() {
           flight={editFlight}
           db={db}
           drones={dronesForSelect}
+          batteries={droneBatteries}
           onSave={handleEdit}
           onCancel={() => setEditFlight(null)}
         />
@@ -1353,15 +1371,28 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </div>
               <div>
                 <label className={labelCls}>מספר זנב</label>
-                <select value={addForm.tailNumber} onChange={e => setAddForm(f => ({ ...f, tailNumber: e.target.value }))} className={inputCls}>
+                <select value={addForm.tailNumber}
+                  onChange={e => setAddForm(f => ({ ...f, tailNumber: e.target.value, battery: '' }))}
+                  className={inputCls}>
                   {dronesForSelect.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                 </select>
               </div>
               <div>
                 <label className={labelCls}>סוללה</label>
-                <input type="text" value={addForm.battery}
-                  onChange={e => setAddForm(f => ({ ...f, battery: e.target.value }))}
-                  placeholder="שם הסוללה..." className={inputCls} />
+                {(() => {
+                  const bats = droneBatteries.filter(b => b.droneTailNumber === addForm.tailNumber)
+                  if (bats.length === 0) return (
+                    <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
+                      <option>אין סוללות רשומות לרחפן זה</option>
+                    </select>
+                  )
+                  return (
+                    <select value={addForm.battery} onChange={e => setAddForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
+                      <option value="">— בחר סוללה —</option>
+                      {bats.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+                    </select>
+                  )
+                })()}
               </div>
               <div>
                 <label className={labelCls}>שעת המראה</label>

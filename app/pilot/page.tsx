@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, isFlightComplete, missingFields } from '@/lib/types'
+import { FlightDB, DroneBattery, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 
 function ConfirmDialog({ message, onConfirm, onCancel }: {
@@ -57,6 +57,7 @@ export default function PilotDashboard() {
   const router = useRouter()
   const [userName, setUserName] = useState('')
   const [db, setDb] = useState<FlightDB | null>(null)
+  const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
   const [form, setForm] = useState({
     date: '', missionName: '', tailNumber: '4x-pzk',
@@ -79,7 +80,13 @@ export default function PilotDashboard() {
     setDb(data)
   }, [])
 
+  const fetchBatteries = useCallback(async () => {
+    const res = await fetch('/api/drone-batteries', { cache: 'no-store' })
+    if (res.ok) setDroneBatteries(await res.json())
+  }, [])
+
   useEffect(() => { fetchDB() }, [fetchDB])
+  useEffect(() => { fetchBatteries() }, [fetchBatteries])
 
   if (!db || !userName) {
     return (
@@ -301,16 +308,27 @@ export default function PilotDashboard() {
               <div>
                 <label className={labelCls}>מספר זנב</label>
                 <select value={form.tailNumber}
-                  onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value, battery: '' }))}
                   className={inputCls}>
                   {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                 </select>
               </div>
               <div>
                 <label className={labelCls}>סוללה</label>
-                <input type="text" value={form.battery}
-                  onChange={e => setForm(f => ({ ...f, battery: e.target.value }))}
-                  placeholder="שם הסוללה..." className={inputCls} />
+                {(() => {
+                  const bats = droneBatteries.filter(b => b.droneTailNumber === form.tailNumber)
+                  if (bats.length === 0) return (
+                    <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
+                      <option>אין סוללות רשומות לרחפן זה</option>
+                    </select>
+                  )
+                  return (
+                    <select value={form.battery} onChange={e => setForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
+                      <option value="">— בחר סוללה —</option>
+                      {bats.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+                    </select>
+                  )
+                })()}
               </div>
               <div>
                 <label className={labelCls}>שעת המראה</label>
