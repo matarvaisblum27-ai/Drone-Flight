@@ -451,8 +451,8 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
           {canManageAdmin && !isFixedAdmin && (
             <div className="flex items-center justify-between bg-slate-700/40 border border-slate-600/40 rounded-lg px-3 py-2.5">
               <div>
-                <p className="text-sm text-white font-medium">הרשאת צפייה בדשבורד</p>
-                <p className="text-xs text-slate-400">גישה לצפייה בדשבורד</p>
+                <p className="text-sm text-white font-medium">הרשאת סגן</p>
+                <p className="text-xs text-slate-400">גישה לדשבורד בתצוגת סגן</p>
               </div>
               <button
                 onClick={() => setIsAdmin(v => !v)}
@@ -648,8 +648,8 @@ export default function AdminDashboard() {
     fetch('/api/auth/me').then(async r => {
       if (!r.ok) { window.location.href = '/'; return }
       const s = await r.json()
-      // Allow admin (אורן) and viewers
-      if (!s.isAdmin && !s.isViewer) { window.location.href = '/'; return }
+      // Allow admin (אורן) and סגן; regular pilots go to their own dashboard
+      if (!s.isAdmin && !s.isViewer) { window.location.href = '/pilot'; return }
       setCurrentUserName(s.name)
     }).catch(() => { window.location.href = '/' })
   }, [])
@@ -999,7 +999,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-300 hidden sm:block">{currentUserName}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full border ${canEdit ? 'bg-blue-600/20 text-blue-400 border-blue-700/40' : 'bg-purple-600/20 text-purple-400 border-purple-700/40'}`}>
-              {canEdit ? 'מפקד' : 'צפייה'}
+              {canEdit ? 'מפקד' : 'סגן'}
             </span>
             {!canEdit && (
               <a href="/pilot"
@@ -1737,7 +1737,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             {p.name === ADMIN_NAME ? (
                               <span className="text-xs bg-blue-600/20 text-blue-400 border border-blue-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">מפקד ראשי</span>
                             ) : p.isAdmin ? (
-                              <span className="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">צופה</span>
+                              <span className="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-700/40 px-2 py-0.5 rounded-full whitespace-nowrap">סגן</span>
                             ) : (
                               <span className="text-xs text-slate-600">טייס</span>
                             )}

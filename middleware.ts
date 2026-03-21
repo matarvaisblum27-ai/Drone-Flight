@@ -7,8 +7,9 @@ export async function middleware(req: NextRequest) {
   const session = token ? await verifySession(token) : null
 
   if (pathname.startsWith('/admin')) {
-    if (!session?.isAdmin) {
-      return NextResponse.redirect(new URL('/', req.url))
+    // Allow admin (אורן) and סגן; redirect others based on whether they're logged in
+    if (!session?.isAdmin && !session?.isViewer) {
+      return NextResponse.redirect(new URL(session ? '/pilot' : '/', req.url))
     }
   }
 
@@ -16,6 +17,7 @@ export async function middleware(req: NextRequest) {
     if (!session) {
       return NextResponse.redirect(new URL('/', req.url))
     }
+    // Only true admin (אורן) cannot access /pilot; viewers CAN (to log their own flights)
     if (session.isAdmin) {
       return NextResponse.redirect(new URL('/admin', req.url))
     }
