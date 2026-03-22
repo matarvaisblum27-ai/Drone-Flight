@@ -648,6 +648,10 @@ export default function AdminDashboard() {
   const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
   // authChecked gates all data loading — nothing renders until DB permission is confirmed
   const [authChecked, setAuthChecked] = useState(false)
+  // Mission merge state
+  const [mergingGroupKey, setMergingGroupKey] = useState<string | null>(null)
+  const [mergeTargetKey, setMergeTargetKey] = useState('')
+  const [merging, setMerging] = useState(false)
 
   const checkPermissions = useCallback(async () => {
     try {
@@ -939,6 +943,37 @@ export default function AdminDashboard() {
     fetchDroneData()
   }
 
+  const handleMergeMission = async (sourceKey: string, targetKey: string) => {
+    if (!sourceKey || !targetKey || sourceKey === targetKey) return
+    const sourceGroup = adminMissionGroups.find(g => g.key === sourceKey)
+    const targetGroup = adminMissionGroups.find(g => g.key === targetKey)
+    if (!sourceGroup || !targetGroup) return
+    setMerging(true)
+    try {
+      // Move all flights from source to target
+      await Promise.all(sourceGroup.flights.map(f =>
+        fetch('/api/flights', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: f.id,
+            missionName: targetGroup.missionName,
+            missionId: targetGroup.missionId ?? null,
+          }),
+        })
+      ))
+      // Delete missions-table entry for source if it had one
+      if (sourceGroup.missionId) {
+        await fetch(`/api/missions?id=${sourceGroup.missionId}`, { method: 'DELETE' })
+      }
+      setMergingGroupKey(null)
+      setMergeTargetKey('')
+      fetchDB()
+    } finally {
+      setMerging(false)
+    }
+  }
+
   const handleMarkGasDrops = async () => {
     setGasDropMigrating(true)
     const res = await fetch('/api/admin/mark-gas-drops', { method: 'POST' })
@@ -955,10 +990,12 @@ export default function AdminDashboard() {
   // Mission groups for history tab
   interface AdminMissionGroup {
     key: string; date: string; missionName: string; missionNum: number
+    missionId: string | undefined  // undefined for legacy flights
     flights: Flight[]; totalMinutes: number
   }
   const adminMissionGroups: AdminMissionGroup[] = (() => {
     const getKey = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
+    const getMissionId = (key: string) => key.startsWith('m:') ? key.slice(2) : undefined
     const chrono = [...db.flights].sort((a, b) =>
       a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || '')
     )
@@ -974,7 +1011,7 @@ export default function AdminDashboard() {
     const groups = new Map<string, AdminMissionGroup>()
     for (const f of sortedHistory) {
       const key = getKey(f)
-      if (!groups.has(key)) groups.set(key, { key, date: f.date, missionName: f.missionName, missionNum: keyToNum[key] ?? 1, flights: [], totalMinutes: 0 })
+      if (!groups.has(key)) groups.set(key, { key, date: f.date, missionName: f.missionName, missionNum: keyToNum[key] ?? 1, missionId: getMissionId(key), flights: [], totalMinutes: 0 })
       const g = groups.get(key)!
       g.flights.push(f)
       g.totalMinutes += f.duration
@@ -1674,10 +1711,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </h2>
               <span className="text-xs text-slate-400">{adminMissionGroups.length} משימות · {db.flights.length} טיסות</span>
             </div>
-            {adminMissionGroups.map(group => (
+            {adminMissionGroups.map(group => {
+              // Other missions on the same date (for merge dropdown)
+              const sameDayGroups = adminMissionGroups.filter(g => g.date === group.date && g.key !== group.key)
+              const isMerging = mergingGroupKey === group.key
+              return (
               <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
                 {/* Mission header */}
-                <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
+                <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3 flex-wrap">
                   <span className="text-indigo-400 text-sm font-bold shrink-0">📋 משימה {group.missionNum}</span>
                   <span className="text-white text-sm font-semibold truncate flex-1">
                     {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
@@ -1688,6 +1729,43 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   )}
                   {group.totalMinutes > 0 && (
                     <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
+                  )}
+                  {/* Merge button — admin only, only when there are other missions on same day */}
+                  {canEdit && sameDayGroups.length > 0 && !isMerging && (
+                    <button
+                      onClick={() => { setMergingGroupKey(group.key); setMergeTargetKey(sameDayGroups[0].key) }}
+                      className="text-xs text-amber-400 hover:text-amber-300 bg-amber-900/20 hover:bg-amber-900/30 border border-amber-700/30 px-2 py-1 rounded-lg transition-all shrink-0"
+                    >
+                      מזג למשימה
+                    </button>
+                  )}
+                  {/* Inline merge UI */}
+                  {canEdit && isMerging && (
+                    <div className="w-full flex items-center gap-2 mt-2 pt-2 border-t border-indigo-700/30">
+                      <span className="text-xs text-amber-300 shrink-0">מזג לתוך:</span>
+                      <select
+                        value={mergeTargetKey}
+                        onChange={e => setMergeTargetKey(e.target.value)}
+                        className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-500 min-w-0"
+                      >
+                        {sameDayGroups.map(g => (
+                          <option key={g.key} value={g.key}>{g.missionName || 'ללא שם'}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleMergeMission(group.key, mergeTargetKey)}
+                        disabled={merging}
+                        className="text-xs text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-3 py-1 rounded-lg transition-all shrink-0 font-medium"
+                      >
+                        {merging ? '...' : 'בצע מיזוג'}
+                      </button>
+                      <button
+                        onClick={() => { setMergingGroupKey(null); setMergeTargetKey('') }}
+                        className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg transition-all shrink-0"
+                      >
+                        ביטול
+                      </button>
+                    </div>
                   )}
                 </div>
                 {/* Flights table */}
@@ -1744,7 +1822,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </table>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
 

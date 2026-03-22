@@ -7,34 +7,6 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
-// ── Mission substring matching ────────────────────────────────────────────────
-// Algorithm (bidirectional substring):
-//   1. Strip all punctuation from both names
-//   2. Flatten name2 (remove all spaces) → flat string
-//   3. For each word (3+ chars) in name1, check if it appears as a substring of flat name2
-//   4. Also do the reverse: words of name2 in flat name1
-//   5. If ANY word matches → MATCH → show popup
-
-function flattenName(s: string): string {
-  return s.replace(/[.'"،,\-_׳״']/g, '').replace(/\s+/g, '')
-}
-
-function nameWords(s: string): string[] {
-  return s.replace(/[.'"،,\-_׳״']/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(w => w.length >= 3)
-}
-
-function isSimilarMission(a: string, b: string): boolean {
-  if (!a.trim() || !b.trim()) return false
-  const flatA = flattenName(a)
-  const flatB = flattenName(b)
-  const wordsA = nameWords(a)
-  const wordsB = nameWords(b)
-  // Check each word of a as substring in flat-b, and vice-versa
-  const match = wordsA.some(w => flatB.includes(w)) || wordsB.some(w => flatA.includes(w))
-  console.log('[isSimilarMission]', JSON.stringify(a), 'vs', JSON.stringify(b),
-    '→ wordsA:', wordsA, 'wordsB:', wordsB, '→ match:', match)
-  return match
-}
 
 // ── Mission grouping for history ──────────────────────────────────────────────
 interface MissionGroup {
@@ -209,7 +181,8 @@ export default function PilotDashboard() {
   const [addStep, setAddStep] = useState<'mission' | 'flight'>('mission')
   const [missionForm, setMissionForm] = useState({ date: '', name: '', battalion: '', observer: '' })
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
-  const [similarMission, setSimilarMission] = useState<Mission | null>(null) // pending join dialog
+  // missionPick: '' = nothing picked yet, 'new' = create new, otherwise = existing mission name
+  const [missionPick, setMissionPick] = useState('')
   const [missionLoading, setMissionLoading] = useState(false)
   const [missionError, setMissionError] = useState('')
 
@@ -271,86 +244,62 @@ export default function PilotDashboard() {
   const handleMissionContinue = async () => {
     setMissionError('')
     if (!missionForm.date) { setMissionError('תאריך הוא שדה חובה'); return }
+
+    const existingNamesOnDate = db
+      ? Array.from(new Set(db.flights.filter(f => f.date === missionForm.date && f.missionName).map(f => f.missionName)))
+      : []
+
+    // Picking an existing mission
+    if (existingNamesOnDate.length > 0 && missionPick && missionPick !== 'new') {
+      setMissionLoading(true)
+      try {
+        const repFlight = db!.flights.find(f => f.date === missionForm.date && f.missionName === missionPick)
+        if (repFlight?.missionId) {
+          // Real missions-table entry exists — fetch it
+          const res = await fetch(`/api/missions?date=${missionForm.date}`)
+          if (res.ok) {
+            const missions: Mission[] = await res.json()
+            const mission = missions.find(m => m.id === repFlight.missionId)
+            if (mission) { setSelectedMission(mission); setAddStep('flight'); return }
+          }
+        }
+        // Legacy flight — create a missions-table entry for it
+        const res = await fetch('/api/missions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: missionForm.date, name: missionPick,
+            battalion: repFlight?.battalion ?? '', observer: repFlight?.observer ?? '',
+          }),
+        })
+        if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+        const mission: Mission = await res.json()
+        setSelectedMission(mission)
+        setAddStep('flight')
+      } finally {
+        setMissionLoading(false)
+      }
+      return
+    }
+
+    // Creating a new mission
+    if (existingNamesOnDate.length > 0 && !missionPick) {
+      setMissionError('יש לבחור משימה קיימת או לבחור "צור משימה חדשה"')
+      return
+    }
     if (!missionForm.name.trim()) { setMissionError('שם משימה הוא שדה חובה'); return }
     setMissionLoading(true)
     try {
-      const typedName = missionForm.name.trim()
-      console.log('[handleMissionContinue] date:', missionForm.date, 'name:', typedName)
-
-      // 1) Check missions table (new-style missions)
-      const res = await fetch(`/api/missions?date=${missionForm.date}`)
-      if (!res.ok) { setMissionError('שגיאה בטעינת משימות'); return }
-      const dayMissions: Mission[] = await res.json()
-      console.log('[handleMissionContinue] missions table entries:', dayMissions.length, dayMissions.map(m => m.name))
-
-      // 2) Also build virtual missions from legacy flights (mission_id = null / empty)
-      //    so we can match against mission_name strings already in the DB.
-      const legacyNamesOnDate = db
-        ? [...new Set(
-            db.flights
-              .filter(f => f.date === missionForm.date && f.missionName && !f.missionId)
-              .map(f => f.missionName)
-          )]
-        : []
-      console.log('[handleMissionContinue] legacy mission names on date:', legacyNamesOnDate)
-
-      // Build virtual Mission objects for legacy flights so we can pass them to joinExistingMission
-      const virtualMissions: Mission[] = legacyNamesOnDate.map((name, i) => ({
-        id: '',            // no real mission id – will be created when joining
-        date: missionForm.date,
-        name,
-        battalion: '',
-        observer: '',
-        missionNumber: i + 1,
-        createdAt: '',
-      }))
-
-      // 3) All candidates: real missions first, then virtual legacy ones
-      const allCandidates: Mission[] = [...dayMissions, ...virtualMissions]
-      console.log('[handleMissionContinue] all candidates:', allCandidates.map(m => `"${m.name}" (id=${m.id || 'legacy'})`))
-
-      // 4) Find first match
-      const match = allCandidates.find(m => isSimilarMission(typedName, m.name))
-      console.log('[handleMissionContinue] match:', match ? `"${match.name}"` : 'none')
-
-      if (match) {
-        // For a legacy (virtual) mission, create a real missions-table entry first
-        if (!match.id) {
-          console.log('[handleMissionContinue] legacy match → creating missions-table entry for:', match.name)
-          const createRes = await fetch('/api/missions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date: match.date, name: match.name, battalion: match.battalion, observer: match.observer }),
-          })
-          if (!createRes.ok) { setMissionError('שגיאה ביצירת משימה'); return }
-          const realMission: Mission = await createRes.json()
-          setSimilarMission(realMission)
-        } else {
-          setSimilarMission(match)
-        }
-      } else {
-        await createMissionAndProceed()
-      }
+      const res = await fetch('/api/missions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalion, observer: missionForm.observer }),
+      })
+      if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+      const mission: Mission = await res.json()
+      setSelectedMission(mission)
+      setAddStep('flight')
     } finally {
       setMissionLoading(false)
     }
-  }
-
-  const createMissionAndProceed = async () => {
-    const res = await fetch('/api/missions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalion, observer: missionForm.observer }),
-    })
-    if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
-    const mission: Mission = await res.json()
-    setSelectedMission(mission)
-    setSimilarMission(null)
-    setAddStep('flight')
-  }
-
-  const joinExistingMission = (mission: Mission) => {
-    setSelectedMission(mission)
-    setSimilarMission(null)
-    setAddStep('flight')
   }
 
   // ── Step 2: save flight under mission ─────────────────────────────────────
@@ -391,7 +340,7 @@ export default function PilotDashboard() {
     setAddStep('mission')
     setMissionForm({ date: '', name: '', battalion: '', observer: '' })
     setSelectedMission(null)
-    setSimilarMission(null)
+    setMissionPick('')
     setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' })
     setFormError('')
     setFormSuccess('')
@@ -556,83 +505,86 @@ export default function PilotDashboard() {
         {/* ADD FLIGHT TAB */}
         {activeTab === 'add' && (
           <div className="space-y-4">
-            {/* Join-existing-mission dialog */}
-            {similarMission && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSimilarMission(null)} />
-                <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center flex-shrink-0 text-lg">📋</div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">נמצאה משימה דומה</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">להצטרף אליה?</p>
-                    </div>
-                  </div>
-                  <div className="bg-slate-700/50 border border-slate-600/40 rounded-xl p-3 mb-5">
-                    <p className="text-sm font-semibold text-indigo-300">{similarMission.name}</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      משימה {similarMission.missionNumber} · {new Date(similarMission.date).toLocaleDateString('he-IL')}
-                      {similarMission.battalion ? ` · ${similarMission.battalion}` : ''}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => createMissionAndProceed()}
-                      className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">
-                      לא, צור משימה חדשה
-                    </button>
-                    <button onClick={() => joinExistingMission(similarMission)}
-                      className="flex-1 px-4 py-2.5 text-sm text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all font-medium">
-                      כן, הצטרף למשימה
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Step 1: Mission details */}
-            {addStep === 'mission' && (
+            {addStep === 'mission' && (() => {
+              const existingNamesOnDate = db
+                ? Array.from(new Set(db.flights.filter(f => f.date === missionForm.date && f.missionName).map(f => f.missionName)))
+                : []
+              const showDropdown = missionForm.date && existingNamesOnDate.length > 0
+              const isCreatingNew = !showDropdown || missionPick === 'new'
+              return (
               <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
                 <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
                   <span className="text-indigo-400">📋</span> שלב 1 — פרטי המשימה
                 </h2>
                 <p className="text-xs text-slate-500 mb-5">הגדר את המשימה. אחר כך תוסיף את פרטי הטיסה.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-4">
+                  {/* Date */}
                   <div>
                     <label className={labelCls}>תאריך <span className="text-red-400">*</span></label>
                     <input type="date" value={missionForm.date}
-                      onChange={e => setMissionForm(f => ({ ...f, date: e.target.value }))}
+                      onChange={e => {
+                        setMissionForm(f => ({ ...f, date: e.target.value, name: '' }))
+                        setMissionPick('')
+                      }}
                       className={inputCls} />
                   </div>
-                  <div>
-                    <label className={labelCls}>שם משימה <span className="text-red-400">*</span></label>
-                    <input type="text" placeholder="מפ שועפט, חיפוי כוחות..." value={missionForm.name}
-                      onChange={e => setMissionForm(f => ({ ...f, name: e.target.value }))}
-                      className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>גדוד (אופציונלי)</label>
-                    <select value={missionForm.battalion} onChange={e => setMissionForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
-                      <option value="">— בחר גדוד —</option>
-                      {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>תצפיתן (אופציונלי)</label>
-                    <input type="text" value={missionForm.observer}
-                      onChange={e => setMissionForm(f => ({ ...f, observer: e.target.value }))}
-                      placeholder="שם התצפיתן..." className={inputCls} />
-                  </div>
+
+                  {/* Mission picker dropdown (shown when there are existing missions on this date) */}
+                  {showDropdown && (
+                    <div>
+                      <label className={labelCls}>בחר משימה קיימת או צור חדשה <span className="text-red-400">*</span></label>
+                      <select
+                        value={missionPick}
+                        onChange={e => setMissionPick(e.target.value)}
+                        className={inputCls}
+                      >
+                        <option value="">— בחר —</option>
+                        {existingNamesOnDate.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                        <option value="new">➕ צור משימה חדשה</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* New mission fields (shown when creating new, or no existing missions) */}
+                  {isCreatingNew && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>שם משימה <span className="text-red-400">*</span></label>
+                        <input type="text" placeholder="מפ שועפט, חיפוי כוחות..." value={missionForm.name}
+                          onChange={e => setMissionForm(f => ({ ...f, name: e.target.value }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>גדוד (אופציונלי)</label>
+                        <select value={missionForm.battalion} onChange={e => setMissionForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
+                          <option value="">— בחר גדוד —</option>
+                          {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                        <input type="text" value={missionForm.observer}
+                          onChange={e => setMissionForm(f => ({ ...f, observer: e.target.value }))}
+                          placeholder="שם התצפיתן..." className={inputCls} />
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 {missionError && (
                   <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{missionError}</div>
                 )}
                 <button onClick={handleMissionContinue} disabled={missionLoading}
                   className="mt-5 w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-                  {missionLoading ? 'בודק...' : 'המשך לפרטי הטיסה'}
+                  {missionLoading ? 'טוען...' : 'המשך לפרטי הטיסה'}
                   {!missionLoading && <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
                 </button>
               </div>
-            )}
+              )
+            })()}
 
             {/* Step 2: Flight details */}
             {addStep === 'flight' && selectedMission && (
