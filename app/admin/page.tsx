@@ -682,9 +682,10 @@ export default function AdminDashboard() {
   const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
   const [expandedDroneCard, setExpandedDroneCard] = useState<string | null>(null)
   const [expandedBattalion, setExpandedBattalion] = useState<string | null>(null)
-  const [expandedKpi, setExpandedKpi] = useState<'hours' | 'missions' | null>(null)
+  const [expandedKpi, setExpandedKpi] = useState<'hours' | 'missions' | 'gas' | null>(null)
   const [expandedHoursMonth, setExpandedHoursMonth] = useState<string | null>(null)
   const [expandedMissionsMonth, setExpandedMissionsMonth] = useState<string | null>(null)
+  const [expandedGasMonth, setExpandedGasMonth] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -832,6 +833,35 @@ export default function AdminDashboard() {
     monthlyMissionsList[month].push({ missionKey: key, missionName: m.name, date: m.date, pilots: Array.from(m.pilots).sort() })
   })
   Object.values(monthlyMissionsList).forEach(ms => ms.sort((a, b) => a.date.localeCompare(b.date)))
+
+  // Combined gas drops YTD (flights with gas_dropped=true + gas_drops table, deduplicated)
+  interface CombinedGasDrop { date: string; pilotName: string; tailNumber: string; model: string; missionName: string; eventNumber: string }
+  const droneModelMap = new Map(DRONES.map(d => [d.tailNumber, d.model]))
+  const allGasDropsYTD: CombinedGasDrop[] = []
+  const gasDropDedupKeys = new Set<string>()
+  db.flights.filter(f => f.gasDropped && f.date.startsWith(thisYear)).forEach(f => {
+    const key = `${f.date}|${f.tailNumber}|${f.pilotName}`
+    if (!gasDropDedupKeys.has(key)) {
+      gasDropDedupKeys.add(key)
+      allGasDropsYTD.push({ date: f.date, pilotName: f.pilotName, tailNumber: f.tailNumber, model: droneModelMap.get(f.tailNumber) ?? f.tailNumber, missionName: f.missionName, eventNumber: f.eventNumber ?? '' })
+    }
+  })
+  gasDrops.filter(g => g.date.startsWith(thisYear)).forEach(g => {
+    const key = `${g.date}|${g.tailNumber}|${g.pilotName}`
+    if (!gasDropDedupKeys.has(key)) {
+      gasDropDedupKeys.add(key)
+      allGasDropsYTD.push({ date: g.date, pilotName: g.pilotName, tailNumber: g.tailNumber, model: droneModelMap.get(g.tailNumber) ?? g.tailNumber, missionName: '—', eventNumber: g.gasDropTime ?? '' })
+    }
+  })
+  allGasDropsYTD.sort((a, b) => a.date.localeCompare(b.date))
+  const monthlyGasDropsList: Record<string, CombinedGasDrop[]> = {}
+  allGasDropsYTD.forEach(drop => {
+    const month = drop.date.slice(0, 7)
+    if (!monthlyGasDropsList[month]) monthlyGasDropsList[month] = []
+    monthlyGasDropsList[month].push(drop)
+  })
+  const gasDropsThisMonth = (monthlyGasDropsList[thisMonth] ?? []).length
+  const gasDropsThisYear = allGasDropsYTD.length
 
   // Battalion breakdown — unique missions (all-time for bar, YTD monthly for drill-down)
   interface BnMissionEntry { missionKey: string; missionName: string; date: string; pilots: string[]; drones: string[] }
@@ -1278,7 +1308,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           </div>
         )}
 
-        {/* Stat cards — 2 compact expandable cards */}
+        {/* Stat cards — 2 compact expandable cards + gas drops card */}
+        <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           {/* Hours card */}
@@ -1430,6 +1461,108 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           </div>
 
         </div>
+
+        {/* Gas drops card — full width */}
+        <div className={`bg-slate-800/70 border ${expandedKpi === 'gas' ? 'border-amber-500/50' : 'border-slate-700/50'} rounded-xl overflow-hidden transition-colors`}>
+          <button
+            onClick={() => setExpandedKpi(expandedKpi === 'gas' ? null : 'gas')}
+            className="w-full px-4 py-3 flex items-center gap-2 active:bg-slate-700/40 transition-colors"
+            dir="rtl"
+          >
+            <span className="text-base shrink-0">🔥</span>
+            <span className="text-sm font-semibold text-white shrink-0">הטלות גז</span>
+            <span className="text-slate-600 shrink-0">|</span>
+            <span className="text-xs text-slate-400 shrink-0">החודש:</span>
+            <span className="text-sm font-medium text-amber-300 shrink-0">{gasDropsThisMonth}</span>
+            <span className="text-slate-600 shrink-0">|</span>
+            <span className="text-xs text-slate-400 shrink-0">השנה:</span>
+            <span className="text-sm font-semibold text-white shrink-0">{gasDropsThisYear}</span>
+            <svg className={`w-3.5 h-3.5 text-slate-500 mr-auto shrink-0 transition-transform ${expandedKpi === 'gas' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {expandedKpi === 'gas' && (() => {
+            const maxCount = Math.max(...kpiMonths.map(m => (monthlyGasDropsList[m] ?? []).length), 1)
+            return (
+              <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-1" dir="rtl">
+                {kpiMonths.map(monthKey => {
+                  const drops = monthlyGasDropsList[monthKey] ?? []
+                  const count = drops.length
+                  const pct = (count / maxCount) * 100
+                  const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
+                  const isMonthOpen = expandedGasMonth === monthKey
+                  return (
+                    <div key={monthKey}>
+                      <button
+                        onClick={() => setExpandedGasMonth(isMonthOpen ? null : monthKey)}
+                        className={`w-full flex items-center gap-3 py-1.5 px-2 rounded-lg transition-colors ${isMonthOpen ? 'bg-slate-700/50' : 'hover:bg-slate-700/30'} ${count === 0 ? 'opacity-40' : ''}`}
+                        disabled={count === 0}
+                      >
+                        <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                        <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-l from-amber-500 to-orange-500 rounded-full transition-all duration-700"
+                            style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-amber-300 w-20 text-left shrink-0">{count > 0 ? `${count} הטלות` : '—'}</span>
+                        {count > 0 && (
+                          <svg className={`w-3 h-3 text-slate-500 shrink-0 transition-transform ${isMonthOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        )}
+                      </button>
+                      {isMonthOpen && (
+                        <div className="mr-4 mb-1 mt-0.5 space-y-2 border-r-2 border-amber-700/40 pr-3">
+                          {drops.map((drop, i) => {
+                            const isOp = !!drop.eventNumber
+                            return (
+                              <div key={i} className="py-1 space-y-0.5">
+                                {/* Line 1: date · pilot · drone */}
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  <span className="text-xs font-medium text-slate-300 shrink-0">{fmtShortDate(drop.date)}</span>
+                                  <span className="text-slate-600 shrink-0">·</span>
+                                  <span className="text-xs text-slate-300 shrink-0">{drop.pilotName}</span>
+                                  <span className="text-slate-600 shrink-0">·</span>
+                                  <span className="text-xs text-slate-400 shrink-0">{drop.model} <span className="font-mono text-slate-500">{drop.tailNumber}</span></span>
+                                </div>
+                                {/* Line 2: type · mission · event number */}
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isOp ? 'bg-green-900/50 text-green-400 border border-green-700/40' : 'bg-yellow-900/40 text-yellow-400 border border-yellow-700/40'}`}>
+                                    {isOp ? 'ירי מבצעי' : 'אימון גז'}
+                                  </span>
+                                  {drop.missionName && drop.missionName !== '—' && (
+                                    <>
+                                      <span className="text-slate-600 shrink-0">·</span>
+                                      <span className="text-xs text-slate-400 shrink-0">משימה: <span className="text-slate-300">{drop.missionName}</span></span>
+                                    </>
+                                  )}
+                                  {drop.eventNumber && (
+                                    <>
+                                      <span className="text-slate-600 shrink-0">·</span>
+                                      <span className="text-xs text-slate-400 shrink-0">אירוע: <span className="text-green-300 font-medium">{drop.eventNumber}</span></span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1 px-2">
+                  <span className="text-xs font-semibold text-white w-14 shrink-0 text-right">סה&quot;כ שנתי</span>
+                  <div className="flex-1" />
+                  <span className="text-xs font-bold text-white w-20 text-left shrink-0">{gasDropsThisYear} הטלות</span>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+
+        </div>{/* end space-y-4 */}
 
         {/* Battalion breakdown card */}
         <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
