@@ -5,7 +5,7 @@ import { FlightDB, DroneBattery, Mission, Flight, isFlightComplete, missingField
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
-const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
+const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'מודיעין', 'כללי']
 
 // ── Mission substring matching ────────────────────────────────────────────────
 // Bidirectional substring: strip punct, flatten name2 (remove spaces),
@@ -423,7 +423,7 @@ export default function PilotDashboard() {
   const durationPreview = flightForm.startTime && flightForm.endTime ? calcDuration(flightForm.startTime, flightForm.endTime) : null
 
   return (
-    <div className="min-h-screen bg-slate-900">
+    <div className="min-h-screen">
       {/* Confirm dialog */}
       {confirmId && (
         <ConfirmDialog

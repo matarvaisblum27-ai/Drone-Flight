@@ -7,7 +7,7 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const ADMIN_NAME = 'אורן וייסבלום'
 const GAS_TAIL_NUMBERS = ['4x-xpg', '4x-ujs']
-const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
+const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'מודיעין', 'כללי']
 const HEBREW_MONTH_NAMES = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const MATRIX_MODELS = ['מאביק 2', 'מאביק 3', 'מאטריס 30', 'מאטריס 300', 'מאטריס 600', 'G3', 'אווטה']
 function toMatrixModel(model: string): string | null {
@@ -1180,7 +1180,7 @@ export default function AdminDashboard() {
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   return (
-    <div className="min-h-screen bg-slate-900">
+    <div className="min-h-screen">
       {/* Modals */}
       {confirmId && (
         <ConfirmDialog

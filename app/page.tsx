@@ -74,7 +74,7 @@ export default function LoginPage() {
   const isDisabled = loading || submitting
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <div
         className="absolute inset-0 opacity-5"
         style={{
