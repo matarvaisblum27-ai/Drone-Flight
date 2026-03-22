@@ -7,27 +7,68 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
-// ── Fuzzy mission matching ────────────────────────────────────────────────────
-function normMission(s: string): string {
-  // Remove spaces, punctuation, Hebrew geresh/gershayim
-  return s.replace(/[\s'".,\-_/\\`׳״]/g, '')
+// ── Smart mission matching ────────────────────────────────────────────────────
+// Generic/common words that don't uniquely identify a mission location.
+// Matching is based on the REMAINING key words after stripping these.
+const MISSION_COMMON_WORDS = new Set([
+  'מפ', 'מ', 'פעילות', 'אימון', 'סיור', 'משימה', 'מחנה',
+  'ביקור', 'הטסה', 'תצפית', 'סריקה', 'בדיקה', 'חיפוי', 'הדרכה',
+])
+
+function stripPunct(s: string): string {
+  // Replace punctuation (including Hebrew geresh/gershayim) with space, collapse whitespace
+  return s.replace(/['".,\-_׳״]/g, ' ').replace(/\s+/g, ' ').trim()
 }
+
+function getKeyWords(s: string): string[] {
+  return stripPunct(s).split(/\s+/).filter(w => w.length > 1 && !MISSION_COMMON_WORDS.has(w))
+}
+
 function levenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
-  const dp = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0)
-  )
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
-  return dp[m][n]
+  if (m === 0) return n
+  if (n === 0) return m
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j)
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0]; dp[0] = i
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j]
+      dp[j] = a[i-1] === b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1])
+      prev = tmp
+    }
+  }
+  return dp[n]
 }
+
+function wordMatch(wa: string, wb: string): boolean {
+  if (wa === wb) return true
+  const maxLen = Math.max(wa.length, wb.length)
+  // 80% similarity: edit distance ≤ 20% of longer word
+  return levenshtein(wa, wb) / maxLen <= 0.2
+}
+
 function isSimilarMission(a: string, b: string): boolean {
-  const na = normMission(a), nb = normMission(b)
-  if (!na || !nb) return false
-  if (na === nb) return true
-  const maxLen = Math.max(na.length, nb.length)
-  return levenshtein(na, nb) <= Math.max(2, Math.floor(maxLen * 0.3))
+  if (!a.trim() || !b.trim()) return false
+  const keyA = getKeyWords(a)
+  const keyB = getKeyWords(b)
+
+  // No key words on either side → compare stripped text exactly
+  if (keyA.length === 0 && keyB.length === 0) {
+    return stripPunct(a) === stripPunct(b)
+  }
+  // One side has key words, the other doesn't → different mission
+  if (keyA.length === 0 || keyB.length === 0) return false
+
+  // All words in the SHORTER key-word list must match in the LONGER list.
+  // (Handles "מפ שועפט" vs "מפ שועפט גזרה דרום" — "שועפט" matches in both.)
+  const [shorter, longer] = keyA.length <= keyB.length ? [keyA, keyB] : [keyB, keyA]
+  const used = new Set<number>()
+  for (const w of shorter) {
+    const idx = longer.findIndex((lw, i) => !used.has(i) && wordMatch(w, lw))
+    if (idx === -1) return false
+    used.add(idx)
+  }
+  return true
 }
 
 // ── Mission grouping for history ──────────────────────────────────────────────
