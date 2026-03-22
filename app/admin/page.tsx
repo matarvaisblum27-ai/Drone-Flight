@@ -677,6 +677,7 @@ export default function AdminDashboard() {
   const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
   const [expandedDroneCard, setExpandedDroneCard] = useState<string | null>(null)
   const [expandedBattalion, setExpandedBattalion] = useState<string | null>(null)
+  const [expandedKpi, setExpandedKpi] = useState<'hours' | 'missions' | null>(null)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -778,6 +779,28 @@ export default function AdminDashboard() {
   const missionKeyFn = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
   const missionsThisMonth = new Set(db.flights.filter(f => f.date.startsWith(thisMonth)).map(missionKeyFn)).size
   const missionsThisYear  = new Set(db.flights.filter(f => f.date.startsWith(thisYear)).map(missionKeyFn)).size
+
+  // Monthly hours YTD (for KPI card expansion)
+  const monthlyHoursYTD: Record<string, number> = {}
+  db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
+    const month = f.date.slice(0, 7)
+    monthlyHoursYTD[month] = (monthlyHoursYTD[month] || 0) + f.duration
+  })
+  const totalMinutesYTD = Object.values(monthlyHoursYTD).reduce((a, v) => a + v, 0)
+  // Monthly missions YTD (for KPI card expansion)
+  const monthlyMissionSetsYTD: Record<string, Set<string>> = {}
+  db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
+    const month = f.date.slice(0, 7)
+    if (!monthlyMissionSetsYTD[month]) monthlyMissionSetsYTD[month] = new Set()
+    monthlyMissionSetsYTD[month].add(missionKeyFn(f))
+  })
+  const monthlyMissionsYTD: Record<string, number> = {}
+  Object.entries(monthlyMissionSetsYTD).forEach(([m, s]) => { monthlyMissionsYTD[m] = s.size })
+  // Months array: Jan through current month of thisYear
+  const kpiMonths = Array.from({ length: now.getMonth() + 1 }, (_, i) => {
+    const m = String(i + 1).padStart(2, '0')
+    return `${thisYear}-${m}`
+  })
 
   // Battalion breakdown — unique missions (all-time for bar, YTD monthly for drill-down)
   interface BnMissionEntry { missionKey: string; missionName: string; date: string; pilots: string[]; drones: string[] }
@@ -1225,21 +1248,129 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         )}
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'סה"כ שעות טיסה', value: fmtHours(totalMinutes), icon: '🕐' },
-            { label: 'טייסים פעילים', value: db.pilots.length, icon: '👨‍✈️' },
-            { label: 'משימות החודש', value: missionsThisMonth, icon: '📋' },
-            { label: 'משימות מתחילת השנה', value: missionsThisYear, icon: '📅' },
-          ].map(({ label, value, icon }) => (
-            <div key={label} className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Hours card — clickable */}
+            <button
+              onClick={() => setExpandedKpi(expandedKpi === 'hours' ? null : 'hours')}
+              className={`text-right bg-slate-800/70 border ${expandedKpi === 'hours' ? 'border-blue-500/60 bg-slate-700/60' : 'border-slate-700/50 hover:border-blue-700/40'} rounded-xl p-5 transition-all active:scale-[0.98]`}
+            >
               <div className="flex items-start justify-between mb-3">
-                <p className="text-xs text-slate-400 leading-tight">{label}</p>
-                <span className="text-xl">{icon}</span>
+                <p className="text-xs text-slate-400 leading-tight">שעות טיסה {thisYear}</p>
+                <div className="flex items-center gap-1">
+                  <span className="text-xl">🕐</span>
+                  <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expandedKpi === 'hours' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
               </div>
-              <p className="text-2xl font-bold text-white">{value}</p>
+              <p className="text-2xl font-bold text-white">{fmtHours(totalMinutesYTD)}</p>
+            </button>
+            {/* Pilots card — static */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
+              <div className="flex items-start justify-between mb-3">
+                <p className="text-xs text-slate-400 leading-tight">טייסים פעילים</p>
+                <span className="text-xl">👨‍✈️</span>
+              </div>
+              <p className="text-2xl font-bold text-white">{db.pilots.length}</p>
             </div>
-          ))}
+            {/* Missions this month — static */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
+              <div className="flex items-start justify-between mb-3">
+                <p className="text-xs text-slate-400 leading-tight">משימות החודש</p>
+                <span className="text-xl">📋</span>
+              </div>
+              <p className="text-2xl font-bold text-white">{missionsThisMonth}</p>
+            </div>
+            {/* Missions YTD — clickable */}
+            <button
+              onClick={() => setExpandedKpi(expandedKpi === 'missions' ? null : 'missions')}
+              className={`text-right bg-slate-800/70 border ${expandedKpi === 'missions' ? 'border-blue-500/60 bg-slate-700/60' : 'border-slate-700/50 hover:border-blue-700/40'} rounded-xl p-5 transition-all active:scale-[0.98]`}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <p className="text-xs text-slate-400 leading-tight">משימות {thisYear}</p>
+                <div className="flex items-center gap-1">
+                  <span className="text-xl">📅</span>
+                  <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expandedKpi === 'missions' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-white">{missionsThisYear}</p>
+            </button>
+          </div>
+
+          {/* Expanded: hours monthly breakdown */}
+          {expandedKpi === 'hours' && (() => {
+            const maxMins = Math.max(...kpiMonths.map(m => monthlyHoursYTD[m] ?? 0), 1)
+            return (
+              <div className="bg-slate-800/70 border border-blue-500/30 rounded-xl p-4" dir="rtl">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <span>🕐</span> פירוט שעות טיסה חודשי — {thisYear}
+                </h3>
+                <div className="space-y-2.5">
+                  {kpiMonths.map(monthKey => {
+                    const mins = monthlyHoursYTD[monthKey] ?? 0
+                    const pct = (mins / maxMins) * 100
+                    const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
+                    return (
+                      <div key={monthKey} className="flex items-center gap-3">
+                        <span className="text-xs text-slate-300 w-16 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                        <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                            style={{ width: `${Math.max(pct, mins > 0 ? 3 : 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-blue-300 w-20 text-left shrink-0">{mins > 0 ? fmtHours(mins) : '—'}</span>
+                      </div>
+                    )
+                  })}
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1">
+                    <span className="text-xs font-semibold text-white w-16 shrink-0 text-right">סה&quot;כ שנתי</span>
+                    <div className="flex-1" />
+                    <span className="text-xs font-bold text-white w-20 text-left shrink-0">{fmtHours(totalMinutesYTD)}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Expanded: missions monthly breakdown */}
+          {expandedKpi === 'missions' && (() => {
+            const maxCount = Math.max(...kpiMonths.map(m => monthlyMissionsYTD[m] ?? 0), 1)
+            return (
+              <div className="bg-slate-800/70 border border-blue-500/30 rounded-xl p-4" dir="rtl">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <span>📅</span> פירוט משימות חודשי — {thisYear}
+                </h3>
+                <div className="space-y-2.5">
+                  {kpiMonths.map(monthKey => {
+                    const count = monthlyMissionsYTD[monthKey] ?? 0
+                    const pct = (count / maxCount) * 100
+                    const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
+                    return (
+                      <div key={monthKey} className="flex items-center gap-3">
+                        <span className="text-xs text-slate-300 w-16 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                        <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                            style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-blue-300 w-20 text-left shrink-0">{count > 0 ? `${count} משימות` : '—'}</span>
+                      </div>
+                    )
+                  })}
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1">
+                    <span className="text-xs font-semibold text-white w-16 shrink-0 text-right">סה&quot;כ שנתי</span>
+                    <div className="flex-1" />
+                    <span className="text-xs font-bold text-white w-20 text-left shrink-0">{missionsThisYear} משימות</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* Battalion breakdown card */}
