@@ -8,20 +8,18 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
 // ── Smart mission matching ────────────────────────────────────────────────────
-// Generic/common words that don't uniquely identify a mission location.
-// Matching is based on the REMAINING key words after stripping these.
-const MISSION_COMMON_WORDS = new Set([
-  'מפ', 'מ', 'פעילות', 'אימון', 'סיור', 'משימה', 'מחנה',
-  'ביקור', 'הטסה', 'תצפית', 'סריקה', 'בדיקה', 'חיפוי', 'הדרכה',
-])
+// Algorithm:
+//   1. Strip punctuation, split into words with 3+ characters
+//   2. Find the LONGEST such word in the new mission name — this is the key identifier
+//   3. Check if that word appears (fuzzily) in any word of the existing mission name
+// Examples:
+//   "שועפט"     longest word: "שועפט"  → found in "מפ' שועפט"  → MATCH
+//   "מפ שועפט"  longest word: "שועפט"  → found in "שועפט"      → MATCH
+//   "מחנה קלקליה" longest: "קלקליה" → NOT in "מחנה פליטים" → NO MATCH
 
-function stripPunct(s: string): string {
-  // Replace punctuation (including Hebrew geresh/gershayim) with space, collapse whitespace
-  return s.replace(/['".,\-_׳״]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-function getKeyWords(s: string): string[] {
-  return stripPunct(s).split(/\s+/).filter(w => w.length > 1 && !MISSION_COMMON_WORDS.has(w))
+function normalizeName(s: string): string {
+  // Replace all punctuation (incl. Hebrew geresh ׳ and gershayim ״) with space
+  return s.replace(/['".,\-_׳״/\\]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 function levenshtein(a: string, b: string): number {
@@ -40,35 +38,29 @@ function levenshtein(a: string, b: string): number {
   return dp[n]
 }
 
-function wordMatch(wa: string, wb: string): boolean {
+function wordFuzzyMatch(wa: string, wb: string): boolean {
   if (wa === wb) return true
   const maxLen = Math.max(wa.length, wb.length)
-  // 80% similarity: edit distance ≤ 20% of longer word
+  // 80% similarity threshold: at most 20% edit distance
   return levenshtein(wa, wb) / maxLen <= 0.2
 }
 
-function isSimilarMission(a: string, b: string): boolean {
-  if (!a.trim() || !b.trim()) return false
-  const keyA = getKeyWords(a)
-  const keyB = getKeyWords(b)
+function isSimilarMission(newName: string, existingName: string): boolean {
+  if (!newName.trim() || !existingName.trim()) return false
 
-  // No key words on either side → compare stripped text exactly
-  if (keyA.length === 0 && keyB.length === 0) {
-    return stripPunct(a) === stripPunct(b)
-  }
-  // One side has key words, the other doesn't → different mission
-  if (keyA.length === 0 || keyB.length === 0) return false
+  const newWords      = normalizeName(newName).split(/\s+/).filter(w => w.length >= 3)
+  const existingWords = normalizeName(existingName).split(/\s+/).filter(w => w.length >= 3)
 
-  // All words in the SHORTER key-word list must match in the LONGER list.
-  // (Handles "מפ שועפט" vs "מפ שועפט גזרה דרום" — "שועפט" matches in both.)
-  const [shorter, longer] = keyA.length <= keyB.length ? [keyA, keyB] : [keyB, keyA]
-  const used = new Set<number>()
-  for (const w of shorter) {
-    const idx = longer.findIndex((lw, i) => !used.has(i) && wordMatch(w, lw))
-    if (idx === -1) return false
-    used.add(idx)
+  // No qualifying words on either side → exact normalized comparison
+  if (newWords.length === 0 || existingWords.length === 0) {
+    return normalizeName(newName) === normalizeName(existingName)
   }
-  return true
+
+  // Longest word in the NEW name is the primary identifier
+  const longestNewWord = newWords.reduce((a, b) => a.length >= b.length ? a : b)
+
+  // Check if it appears in any word of the existing mission name
+  return existingWords.some(ew => wordFuzzyMatch(longestNewWord, ew))
 }
 
 // ── Mission grouping for history ──────────────────────────────────────────────
