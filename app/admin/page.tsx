@@ -1247,130 +1247,109 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           </div>
         )}
 
-        {/* Stat cards */}
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Hours card — clickable */}
+        {/* Stat cards — 2 compact expandable cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* Hours card */}
+          <div className={`bg-slate-800/70 border ${expandedKpi === 'hours' ? 'border-blue-500/50' : 'border-slate-700/50'} rounded-xl overflow-hidden transition-colors`}>
             <button
               onClick={() => setExpandedKpi(expandedKpi === 'hours' ? null : 'hours')}
-              className={`text-right bg-slate-800/70 border ${expandedKpi === 'hours' ? 'border-blue-500/60 bg-slate-700/60' : 'border-slate-700/50 hover:border-blue-700/40'} rounded-xl p-5 transition-all active:scale-[0.98]`}
+              className="w-full px-4 py-3 flex items-center gap-2 active:bg-slate-700/40 transition-colors"
+              dir="rtl"
             >
-              <div className="flex items-start justify-between mb-3">
-                <p className="text-xs text-slate-400 leading-tight">שעות טיסה {thisYear}</p>
-                <div className="flex items-center gap-1">
-                  <span className="text-xl">🕐</span>
-                  <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expandedKpi === 'hours' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-white">{fmtHours(totalMinutesYTD)}</p>
+              <span className="text-base shrink-0">🕐</span>
+              <span className="text-sm font-semibold text-white shrink-0">שעות טיסה</span>
+              <span className="text-slate-600 shrink-0">|</span>
+              <span className="text-xs text-slate-400 shrink-0">החודש:</span>
+              <span className="text-sm font-medium text-blue-300 shrink-0">{fmtHours(monthlyHoursYTD[thisMonth] ?? 0)}</span>
+              <span className="text-slate-600 shrink-0">|</span>
+              <span className="text-xs text-slate-400 shrink-0">השנה:</span>
+              <span className="text-sm font-semibold text-white shrink-0">{fmtHours(totalMinutesYTD)}</span>
+              <svg className={`w-3.5 h-3.5 text-slate-500 mr-auto shrink-0 transition-transform ${expandedKpi === 'hours' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
-            {/* Pilots card — static */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <p className="text-xs text-slate-400 leading-tight">טייסים פעילים</p>
-                <span className="text-xl">👨‍✈️</span>
-              </div>
-              <p className="text-2xl font-bold text-white">{db.pilots.length}</p>
-            </div>
-            {/* Missions this month — static */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 hover:border-blue-700/40 transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <p className="text-xs text-slate-400 leading-tight">משימות החודש</p>
-                <span className="text-xl">📋</span>
-              </div>
-              <p className="text-2xl font-bold text-white">{missionsThisMonth}</p>
-            </div>
-            {/* Missions YTD — clickable */}
-            <button
-              onClick={() => setExpandedKpi(expandedKpi === 'missions' ? null : 'missions')}
-              className={`text-right bg-slate-800/70 border ${expandedKpi === 'missions' ? 'border-blue-500/60 bg-slate-700/60' : 'border-slate-700/50 hover:border-blue-700/40'} rounded-xl p-5 transition-all active:scale-[0.98]`}
-            >
-              <div className="flex items-start justify-between mb-3">
-                <p className="text-xs text-slate-400 leading-tight">משימות {thisYear}</p>
-                <div className="flex items-center gap-1">
-                  <span className="text-xl">📅</span>
-                  <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expandedKpi === 'missions' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-white">{missionsThisYear}</p>
-            </button>
-          </div>
-
-          {/* Expanded: hours monthly breakdown */}
-          {expandedKpi === 'hours' && (() => {
-            const maxMins = Math.max(...kpiMonths.map(m => monthlyHoursYTD[m] ?? 0), 1)
-            return (
-              <div className="bg-slate-800/70 border border-blue-500/30 rounded-xl p-4" dir="rtl">
-                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
-                  <span>🕐</span> פירוט שעות טיסה חודשי — {thisYear}
-                </h3>
-                <div className="space-y-2.5">
+            {expandedKpi === 'hours' && (() => {
+              const maxMins = Math.max(...kpiMonths.map(m => monthlyHoursYTD[m] ?? 0), 1)
+              return (
+                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-2.5" dir="rtl">
                   {kpiMonths.map(monthKey => {
                     const mins = monthlyHoursYTD[monthKey] ?? 0
                     const pct = (mins / maxMins) * 100
                     const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
                     return (
                       <div key={monthKey} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-300 w-16 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
-                        <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
+                        <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                        <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
                             style={{ width: `${Math.max(pct, mins > 0 ? 3 : 0)}%` }}
                           />
                         </div>
-                        <span className="text-xs font-medium text-blue-300 w-20 text-left shrink-0">{mins > 0 ? fmtHours(mins) : '—'}</span>
+                        <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{mins > 0 ? fmtHours(mins) : '—'}</span>
                       </div>
                     )
                   })}
-                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1">
-                    <span className="text-xs font-semibold text-white w-16 shrink-0 text-right">סה&quot;כ שנתי</span>
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5">
+                    <span className="text-xs font-semibold text-white w-14 shrink-0 text-right">סה&quot;כ שנתי</span>
                     <div className="flex-1" />
-                    <span className="text-xs font-bold text-white w-20 text-left shrink-0">{fmtHours(totalMinutesYTD)}</span>
+                    <span className="text-xs font-bold text-white w-16 text-left shrink-0">{fmtHours(totalMinutesYTD)}</span>
                   </div>
                 </div>
-              </div>
-            )
-          })()}
+              )
+            })()}
+          </div>
 
-          {/* Expanded: missions monthly breakdown */}
-          {expandedKpi === 'missions' && (() => {
-            const maxCount = Math.max(...kpiMonths.map(m => monthlyMissionsYTD[m] ?? 0), 1)
-            return (
-              <div className="bg-slate-800/70 border border-blue-500/30 rounded-xl p-4" dir="rtl">
-                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
-                  <span>📅</span> פירוט משימות חודשי — {thisYear}
-                </h3>
-                <div className="space-y-2.5">
+          {/* Missions card */}
+          <div className={`bg-slate-800/70 border ${expandedKpi === 'missions' ? 'border-blue-500/50' : 'border-slate-700/50'} rounded-xl overflow-hidden transition-colors`}>
+            <button
+              onClick={() => setExpandedKpi(expandedKpi === 'missions' ? null : 'missions')}
+              className="w-full px-4 py-3 flex items-center gap-2 active:bg-slate-700/40 transition-colors"
+              dir="rtl"
+            >
+              <span className="text-base shrink-0">📋</span>
+              <span className="text-sm font-semibold text-white shrink-0">משימות</span>
+              <span className="text-slate-600 shrink-0">|</span>
+              <span className="text-xs text-slate-400 shrink-0">החודש:</span>
+              <span className="text-sm font-medium text-blue-300 shrink-0">{missionsThisMonth}</span>
+              <span className="text-slate-600 shrink-0">|</span>
+              <span className="text-xs text-slate-400 shrink-0">השנה:</span>
+              <span className="text-sm font-semibold text-white shrink-0">{missionsThisYear}</span>
+              <svg className={`w-3.5 h-3.5 text-slate-500 mr-auto shrink-0 transition-transform ${expandedKpi === 'missions' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {expandedKpi === 'missions' && (() => {
+              const maxCount = Math.max(...kpiMonths.map(m => monthlyMissionsYTD[m] ?? 0), 1)
+              return (
+                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-2.5" dir="rtl">
                   {kpiMonths.map(monthKey => {
                     const count = monthlyMissionsYTD[monthKey] ?? 0
                     const pct = (count / maxCount) * 100
                     const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
                     return (
                       <div key={monthKey} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-300 w-16 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
-                        <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
+                        <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                        <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
                             style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
                           />
                         </div>
-                        <span className="text-xs font-medium text-blue-300 w-20 text-left shrink-0">{count > 0 ? `${count} משימות` : '—'}</span>
+                        <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{count > 0 ? `${count} משימות` : '—'}</span>
                       </div>
                     )
                   })}
-                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1">
-                    <span className="text-xs font-semibold text-white w-16 shrink-0 text-right">סה&quot;כ שנתי</span>
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5">
+                    <span className="text-xs font-semibold text-white w-14 shrink-0 text-right">סה&quot;כ שנתי</span>
                     <div className="flex-1" />
-                    <span className="text-xs font-bold text-white w-20 text-left shrink-0">{missionsThisYear} משימות</span>
+                    <span className="text-xs font-bold text-white w-16 text-left shrink-0">{missionsThisYear} משימות</span>
                   </div>
                 </div>
-              </div>
-            )
-          })()}
+              )
+            })()}
+          </div>
+
         </div>
 
         {/* Battalion breakdown card */}
