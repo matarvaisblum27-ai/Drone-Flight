@@ -30,6 +30,11 @@ function fmtHours(minutes: number) {
   return m === 0 ? `${h}ש'` : `${h}ש' ${m}ד'`
 }
 
+function fmtShortDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-')
+  return `${parseInt(d)}.${parseInt(m)}.${y.slice(2)}`
+}
+
 function calcDuration(start: string, end: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [eh, em] = end.split(':').map(Number)
@@ -678,6 +683,8 @@ export default function AdminDashboard() {
   const [expandedDroneCard, setExpandedDroneCard] = useState<string | null>(null)
   const [expandedBattalion, setExpandedBattalion] = useState<string | null>(null)
   const [expandedKpi, setExpandedKpi] = useState<'hours' | 'missions' | null>(null)
+  const [expandedHoursMonth, setExpandedHoursMonth] = useState<string | null>(null)
+  const [expandedMissionsMonth, setExpandedMissionsMonth] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -801,6 +808,30 @@ export default function AdminDashboard() {
     const m = String(i + 1).padStart(2, '0')
     return `${thisYear}-${m}`
   })
+
+  // Per-pilot monthly hours (for KPI hours drill-down)
+  const monthlyHoursByPilot: Record<string, Record<string, number>> = {}
+  db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
+    const month = f.date.slice(0, 7)
+    if (!monthlyHoursByPilot[month]) monthlyHoursByPilot[month] = {}
+    monthlyHoursByPilot[month][f.pilotName] = (monthlyHoursByPilot[month][f.pilotName] || 0) + f.duration
+  })
+
+  // Per-month mission list with participants (for KPI missions drill-down)
+  interface KpiMission { missionKey: string; missionName: string; date: string; pilots: string[] }
+  const monthlyMissionsList: Record<string, KpiMission[]> = {}
+  const kpiMissionMap = new Map<string, { name: string; date: string; pilots: Set<string> }>()
+  db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
+    const key = missionKeyFn(f)
+    if (!kpiMissionMap.has(key)) kpiMissionMap.set(key, { name: f.missionName, date: f.date, pilots: new Set() })
+    kpiMissionMap.get(key)!.pilots.add(f.pilotName)
+  })
+  kpiMissionMap.forEach((m, key) => {
+    const month = m.date.slice(0, 7)
+    if (!monthlyMissionsList[month]) monthlyMissionsList[month] = []
+    monthlyMissionsList[month].push({ missionKey: key, missionName: m.name, date: m.date, pilots: Array.from(m.pilots).sort() })
+  })
+  Object.values(monthlyMissionsList).forEach(ms => ms.sort((a, b) => a.date.localeCompare(b.date)))
 
   // Battalion breakdown — unique missions (all-time for bar, YTD monthly for drill-down)
   interface BnMissionEntry { missionKey: string; missionName: string; date: string; pilots: string[]; drones: string[] }
@@ -1272,25 +1303,49 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             {expandedKpi === 'hours' && (() => {
               const maxMins = Math.max(...kpiMonths.map(m => monthlyHoursYTD[m] ?? 0), 1)
               return (
-                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-2.5" dir="rtl">
+                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-1" dir="rtl">
                   {kpiMonths.map(monthKey => {
                     const mins = monthlyHoursYTD[monthKey] ?? 0
                     const pct = (mins / maxMins) * 100
                     const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
+                    const isMonthOpen = expandedHoursMonth === monthKey
+                    const pilotRows = Object.entries(monthlyHoursByPilot[monthKey] ?? {})
+                      .sort((a, b) => b[1] - a[1])
                     return (
-                      <div key={monthKey} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
-                        <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
-                            style={{ width: `${Math.max(pct, mins > 0 ? 3 : 0)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{mins > 0 ? fmtHours(mins) : '—'}</span>
+                      <div key={monthKey}>
+                        <button
+                          onClick={() => setExpandedHoursMonth(isMonthOpen ? null : monthKey)}
+                          className={`w-full flex items-center gap-3 py-1.5 px-2 rounded-lg transition-colors ${isMonthOpen ? 'bg-slate-700/50' : 'hover:bg-slate-700/30'} ${mins === 0 ? 'opacity-40' : ''}`}
+                          disabled={mins === 0}
+                        >
+                          <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                          <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                              style={{ width: `${Math.max(pct, mins > 0 ? 3 : 0)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{mins > 0 ? fmtHours(mins) : '—'}</span>
+                          {mins > 0 && (
+                            <svg className={`w-3 h-3 text-slate-500 shrink-0 transition-transform ${isMonthOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          )}
+                        </button>
+                        {isMonthOpen && (
+                          <div className="mr-4 mb-1 mt-0.5 space-y-0.5 border-r-2 border-slate-600/50 pr-3">
+                            {pilotRows.map(([name, pilotMins]) => (
+                              <div key={name} className="flex items-center gap-2 py-0.5">
+                                <span className="text-xs text-slate-400 flex-1 text-right">{name}</span>
+                                <span className="text-xs font-medium text-slate-300 shrink-0">{fmtHours(pilotMins)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
-                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5">
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1 px-2">
                     <span className="text-xs font-semibold text-white w-14 shrink-0 text-right">סה&quot;כ שנתי</span>
                     <div className="flex-1" />
                     <span className="text-xs font-bold text-white w-16 text-left shrink-0">{fmtHours(totalMinutesYTD)}</span>
@@ -1322,25 +1377,49 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             {expandedKpi === 'missions' && (() => {
               const maxCount = Math.max(...kpiMonths.map(m => monthlyMissionsYTD[m] ?? 0), 1)
               return (
-                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-2.5" dir="rtl">
+                <div className="border-t border-slate-700/50 px-4 pt-3 pb-4 space-y-1" dir="rtl">
                   {kpiMonths.map(monthKey => {
                     const count = monthlyMissionsYTD[monthKey] ?? 0
                     const pct = (count / maxCount) * 100
                     const monthIdx = parseInt(monthKey.slice(5, 7), 10) - 1
+                    const isMonthOpen = expandedMissionsMonth === monthKey
+                    const missions = monthlyMissionsList[monthKey] ?? []
                     return (
-                      <div key={monthKey} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
-                        <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
-                            style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{count > 0 ? `${count} משימות` : '—'}</span>
+                      <div key={monthKey}>
+                        <button
+                          onClick={() => setExpandedMissionsMonth(isMonthOpen ? null : monthKey)}
+                          className={`w-full flex items-center gap-3 py-1.5 px-2 rounded-lg transition-colors ${isMonthOpen ? 'bg-slate-700/50' : 'hover:bg-slate-700/30'} ${count === 0 ? 'opacity-40' : ''}`}
+                          disabled={count === 0}
+                        >
+                          <span className="text-xs text-slate-300 w-14 shrink-0 text-right">{HEBREW_MONTH_NAMES[monthIdx]}</span>
+                          <div className="flex-1 h-2.5 bg-slate-600/50 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                              style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-blue-300 w-16 text-left shrink-0">{count > 0 ? `${count} משימות` : '—'}</span>
+                          {count > 0 && (
+                            <svg className={`w-3 h-3 text-slate-500 shrink-0 transition-transform ${isMonthOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          )}
+                        </button>
+                        {isMonthOpen && (
+                          <div className="mr-4 mb-1 mt-0.5 space-y-1 border-r-2 border-slate-600/50 pr-3">
+                            {missions.map(ms => (
+                              <div key={ms.missionKey} className="flex items-start gap-2 py-0.5">
+                                <span className="text-xs text-slate-500 shrink-0 mt-px">{fmtShortDate(ms.date)}</span>
+                                <span className="text-xs text-slate-300 flex-1 text-right leading-snug">{ms.missionName}</span>
+                                <span className="text-xs text-slate-400 shrink-0 text-left">{ms.pilots.join(', ')}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
-                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5">
+                  <div className="flex items-center gap-3 border-t border-slate-600/50 pt-2.5 mt-1 px-2">
                     <span className="text-xs font-semibold text-white w-14 shrink-0 text-right">סה&quot;כ שנתי</span>
                     <div className="flex-1" />
                     <span className="text-xs font-bold text-white w-16 text-left shrink-0">{missionsThisYear} משימות</span>
