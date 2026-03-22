@@ -1578,9 +1578,12 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   const maxYTD = Math.max(...dronesForSelect.map(d => droneYTDMins[d.tailNumber] ?? 0), 1)
                   const pct = ytdMins / maxYTD
                   const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
-                  const lastGasDrop = isGas
-                    ? gasDrops.filter(g => g.tailNumber === drone.tailNumber).sort((a, b) => b.date.localeCompare(a.date))[0]
-                    : null
+                  const lastGasDropDate = isGas ? (() => {
+                    const fromTable  = gasDrops.filter(g => g.tailNumber === drone.tailNumber).map(g => g.date)
+                    const fromFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber && f.gasDropped).map(f => f.date)
+                    const all = [...fromTable, ...fromFlights].sort((a, b) => b.localeCompare(a))
+                    return all[0] ?? null
+                  })() : null
                   const barColor = pct > 0.66 ? 'from-cyan-500 to-blue-400' : pct > 0.33 ? 'from-blue-500 to-blue-600' : pct > 0 ? 'from-blue-700 to-slate-500' : 'from-slate-700 to-slate-600'
                   const hoursColor = pct > 0.66 ? 'text-cyan-400' : pct > 0.33 ? 'text-blue-400' : pct > 0 ? 'text-blue-500' : 'text-slate-500'
                   const borderColor = pct > 0.66 ? 'border-cyan-500/30' : pct > 0.33 ? 'border-blue-500/30' : pct > 0 ? 'border-blue-800/30' : 'border-slate-600/30'
@@ -1605,8 +1608,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         {isGas && (
                           <div className="mt-2 pt-2 border-t border-slate-600/40">
                             <p className="text-[10px] text-slate-400">הטלה אחרונה</p>
-                            <p className={`text-xs font-semibold ${lastGasDrop ? 'text-green-400' : 'text-slate-500'}`}>
-                              {lastGasDrop ? new Date(lastGasDrop.date).toLocaleDateString('he-IL') : '—'}
+                            <p className={`text-xs font-semibold ${lastGasDropDate ? 'text-green-400' : 'text-slate-500'}`}>
+                              {lastGasDropDate ? new Date(lastGasDropDate).toLocaleDateString('he-IL') : '—'}
                             </p>
                           </div>
                         )}
