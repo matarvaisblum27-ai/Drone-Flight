@@ -7,45 +7,36 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
-// ── Mission similarity matching ───────────────────────────────────────────────
-// 1. Strip all punctuation (. ' " - , and Hebrew ׳ ״) from both names
-// 2. Remove all spaces → single normalized string of letters only
-// 3. Levenshtein similarity = 1 - (editDistance / longerLength)
-// 4. Similarity ≥ 80% → same mission → show confirmation popup
+// ── Mission word-overlap matching ─────────────────────────────────────────────
+// Rule: if ANY word (2+ characters) from the new name appears in the existing
+// name → show the "להצטרף?" popup and let the user decide.
 //
-// Examples after normalization:
-//   "מפ' שועפט" → "מפשועפט"   vs "מ.שועפט" → "משועפט"   dist=1/8 → 87% ✓
-//   "אימון מנחת" → "אימוןמנחת" vs "אימון במנחת" → "אימוןבמנחת" dist=1/10 → 90% ✓
-//   "מחנה פליטים" → "מחנהפליטים" vs "מחנה קלקליה" → "מחנהקלקליה" dist≈5/10 → 50% ✗
+// Steps:
+//   1. Strip all punctuation (' . " - , ׳ ״) from both names
+//   2. Split into words
+//   3. If any word with 2+ chars from either name appears in the other → MATCH
+//
+// Examples:
+//   "מערך הר"     words: ["מערך","הר"]  ∩  "הר הבית"  words: ["הר","הבית"]
+//     → "הר" shared → popup ✓
+//   "מערך הר הבית" words: ["מערך","הר","הבית"]  ∩  "הר הבית" → "הר","הבית" shared → popup ✓
+//   "קלקליה"      words: ["קלקליה"]  ∩  "שועפט" words: ["שועפט"] → none shared → new mission ✓
 
-function normMissionStr(s: string): string {
-  // Remove punctuation and ALL spaces → bare character sequence
-  return s.replace(/[.'"،,\-_׳״]/g, '').replace(/\s+/g, '')
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length
-  if (m === 0) return n
-  if (n === 0) return m
-  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j)
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0]; dp[0] = i
-    for (let j = 1; j <= n; j++) {
-      const tmp = dp[j]
-      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1])
-      prev = tmp
-    }
-  }
-  return dp[n]
+function missionWords(s: string): Set<string> {
+  return new Set(
+    s.replace(/[.'"،,\-_׳״]/g, ' ')
+     .replace(/\s+/g, ' ')
+     .trim()
+     .split(' ')
+     .filter(w => w.length >= 2)
+  )
 }
 
 function isSimilarMission(newName: string, existingName: string): boolean {
-  const a = normMissionStr(newName)
-  const b = normMissionStr(existingName)
-  if (!a || !b) return false
-  const maxLen = Math.max(a.length, b.length)
-  const similarity = 1 - levenshtein(a, b) / maxLen
-  return similarity >= 0.8
+  if (!newName.trim() || !existingName.trim()) return false
+  const newWords = missionWords(newName)
+  const existingWords = missionWords(existingName)
+  return Array.from(newWords).some(w => existingWords.has(w))
 }
 
 // ── Mission grouping for history ──────────────────────────────────────────────
@@ -530,7 +521,7 @@ export default function PilotDashboard() {
                     <div className="w-10 h-10 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center flex-shrink-0 text-lg">📋</div>
                     <div>
                       <h3 className="text-sm font-semibold text-white">נמצאה משימה דומה</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">להצטרף למשימה קיימת?</p>
+                      <p className="text-xs text-slate-400 mt-0.5">להצטרף אליה?</p>
                     </div>
                   </div>
                   <div className="bg-slate-700/50 border border-slate-600/40 rounded-xl p-3 mb-5">
@@ -543,11 +534,11 @@ export default function PilotDashboard() {
                   <div className="flex gap-2">
                     <button onClick={() => createMissionAndProceed()}
                       className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">
-                      צור משימה חדשה
+                      לא, צור משימה חדשה
                     </button>
                     <button onClick={() => joinExistingMission(similarMission)}
                       className="flex-1 px-4 py-2.5 text-sm text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all font-medium">
-                      הצטרף למשימה
+                      כן, הצטרף למשימה
                     </button>
                   </div>
                 </div>
