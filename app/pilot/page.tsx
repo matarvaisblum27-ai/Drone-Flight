@@ -875,10 +875,16 @@ export default function PilotDashboard() {
                 </button>
               </div>
             ) : (
-              buildMissionGroups(myFlights).map((group, gi) => (
-                <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              buildMissionGroups(myFlights).map((group, gi) => {
+                const monthIdx = new Date(group.date).getMonth()
+                const monthBorder = ['border-l-blue-500', 'border-l-green-500', 'border-l-yellow-500'][monthIdx % 3]
+                const monthBadge  = ['bg-blue-900/40 text-blue-300 border-blue-700/40', 'bg-green-900/40 text-green-300 border-green-700/40', 'bg-yellow-900/40 text-yellow-300 border-yellow-700/40'][monthIdx % 3]
+                const monthName   = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'][monthIdx]
+                return (
+                <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${monthBorder} rounded-xl overflow-hidden`}>
                   {/* Mission header */}
                   <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
+                    <span className={`text-xs px-1.5 py-0.5 rounded border font-medium shrink-0 ${monthBadge}`}>{monthName}</span>
                     <span className="text-white text-sm font-semibold truncate flex-1">
                       📋 {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                     </span>
@@ -935,7 +941,7 @@ export default function PilotDashboard() {
                     })}
                   </div>
                 </div>
-              ))
+              )})
             )}
           </div>
         )}
