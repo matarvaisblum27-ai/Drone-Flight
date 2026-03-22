@@ -7,19 +7,20 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
-// ── Smart mission matching ────────────────────────────────────────────────────
-// Algorithm:
-//   1. Strip punctuation, split into words with 3+ characters
-//   2. Find the LONGEST such word in the new mission name — this is the key identifier
-//   3. Check if that word appears (fuzzily) in any word of the existing mission name
-// Examples:
-//   "שועפט"     longest word: "שועפט"  → found in "מפ' שועפט"  → MATCH
-//   "מפ שועפט"  longest word: "שועפט"  → found in "שועפט"      → MATCH
-//   "מחנה קלקליה" longest: "קלקליה" → NOT in "מחנה פליטים" → NO MATCH
+// ── Mission similarity matching ───────────────────────────────────────────────
+// 1. Strip all punctuation (. ' " - , and Hebrew ׳ ״) from both names
+// 2. Remove all spaces → single normalized string of letters only
+// 3. Levenshtein similarity = 1 - (editDistance / longerLength)
+// 4. Similarity ≥ 80% → same mission → show confirmation popup
+//
+// Examples after normalization:
+//   "מפ' שועפט" → "מפשועפט"   vs "מ.שועפט" → "משועפט"   dist=1/8 → 87% ✓
+//   "אימון מנחת" → "אימוןמנחת" vs "אימון במנחת" → "אימוןבמנחת" dist=1/10 → 90% ✓
+//   "מחנה פליטים" → "מחנהפליטים" vs "מחנה קלקליה" → "מחנהקלקליה" dist≈5/10 → 50% ✗
 
-function normalizeName(s: string): string {
-  // Replace all punctuation (incl. Hebrew geresh ׳ and gershayim ״) with space
-  return s.replace(/['".,\-_׳״/\\]/g, ' ').replace(/\s+/g, ' ').trim()
+function normMissionStr(s: string): string {
+  // Remove punctuation and ALL spaces → bare character sequence
+  return s.replace(/[.'"،,\-_׳״]/g, '').replace(/\s+/g, '')
 }
 
 function levenshtein(a: string, b: string): number {
@@ -31,36 +32,20 @@ function levenshtein(a: string, b: string): number {
     let prev = dp[0]; dp[0] = i
     for (let j = 1; j <= n; j++) {
       const tmp = dp[j]
-      dp[j] = a[i-1] === b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1])
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1])
       prev = tmp
     }
   }
   return dp[n]
 }
 
-function wordFuzzyMatch(wa: string, wb: string): boolean {
-  if (wa === wb) return true
-  const maxLen = Math.max(wa.length, wb.length)
-  // 80% similarity threshold: at most 20% edit distance
-  return levenshtein(wa, wb) / maxLen <= 0.2
-}
-
 function isSimilarMission(newName: string, existingName: string): boolean {
-  if (!newName.trim() || !existingName.trim()) return false
-
-  const newWords      = normalizeName(newName).split(/\s+/).filter(w => w.length >= 3)
-  const existingWords = normalizeName(existingName).split(/\s+/).filter(w => w.length >= 3)
-
-  // No qualifying words on either side → exact normalized comparison
-  if (newWords.length === 0 || existingWords.length === 0) {
-    return normalizeName(newName) === normalizeName(existingName)
-  }
-
-  // Longest word in the NEW name is the primary identifier
-  const longestNewWord = newWords.reduce((a, b) => a.length >= b.length ? a : b)
-
-  // Check if it appears in any word of the existing mission name
-  return existingWords.some(ew => wordFuzzyMatch(longestNewWord, ew))
+  const a = normMissionStr(newName)
+  const b = normMissionStr(existingName)
+  if (!a || !b) return false
+  const maxLen = Math.max(a.length, b.length)
+  const similarity = 1 - levenshtein(a, b) / maxLen
+  return similarity >= 0.8
 }
 
 // ── Mission grouping for history ──────────────────────────────────────────────
