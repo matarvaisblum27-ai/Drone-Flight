@@ -686,6 +686,7 @@ export default function AdminDashboard() {
   const [expandedHoursMonth, setExpandedHoursMonth] = useState<string | null>(null)
   const [expandedMissionsMonth, setExpandedMissionsMonth] = useState<string | null>(null)
   const [expandedGasMonth, setExpandedGasMonth] = useState<string | null>(null)
+  const [battalionMigrating, setBattalionMigrating] = useState(false)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -1140,7 +1141,6 @@ export default function AdminDashboard() {
     fetchGasDrops()
   }
 
-  const [battalionMigrating, setBattalionMigrating] = useState(false)
   const handleRenameBattalions = async () => {
     setBattalionMigrating(true)
     const res = await fetch('/api/admin/rename-battalions', { method: 'POST' })
