@@ -5,6 +5,17 @@ import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
+function parseArray(val: unknown): string[] {
+  if (!val) return []
+  const s = String(val).trim()
+  if (!s) return []
+  try {
+    const parsed = JSON.parse(s)
+    if (Array.isArray(parsed)) return parsed.filter(Boolean)
+  } catch {}
+  return [s]
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToFlight(row: any): Flight {
   return {
@@ -19,10 +30,10 @@ function rowToFlight(row: any): Flight {
     startTime:   row.start_time    ?? '',
     endTime:     row.end_time      ?? '',
     duration:    row.duration      ?? 0,
-    observer:    row.observer      ?? '',
+    observer:    parseArray(row.observer),
     gasDropped:  row.gas_dropped   ?? false,
     eventNumber: row.gas_drop_time ?? '',  // reuse existing column for event number
-    battalion:   row.battalion     ?? '',
+    battalion:   parseArray(row.battalion),
   }
 }
 
@@ -83,6 +94,7 @@ export async function POST(req: NextRequest) {
   const endTime   = body.endTime   ?? ''
   const duration  = startTime && endTime ? (Number(body.duration) || 0) : 0
 
+  const toArr = (v: unknown) => Array.isArray(v) ? v : (v ? [String(v)] : [])
   const record = {
     id:            `f${Date.now()}`,
     pilot_id:      body.pilotId,
@@ -97,10 +109,10 @@ export async function POST(req: NextRequest) {
     battery_start: 0,
     battery_end:   0,
     duration,
-    observer:      body.observer     ?? '',
+    observer:      JSON.stringify(toArr(body.observer)),
     gas_dropped:   body.gasDropped   ?? false,
     gas_drop_time: body.eventNumber  || null,
-    battalion:     body.battalion    ?? '',
+    battalion:     JSON.stringify(toArr(body.battalion)),
   }
 
   const { data, error } = await supabase.from('flights').insert(record).select().single()
@@ -141,14 +153,19 @@ export async function PUT(req: NextRequest) {
     duration,
   }
 
+  const toArr2 = (v: unknown) => Array.isArray(v) ? v : (v ? [String(v)] : [])
   if (migrated) {
-    updates.observer      = body.observer    ?? existing.observer     ?? ''
+    updates.observer      = body.observer !== undefined
+      ? JSON.stringify(toArr2(body.observer))
+      : (existing.observer ?? '[]')
     updates.gas_dropped   = body.gasDropped  ?? existing.gas_dropped  ?? false
     updates.gas_drop_time = body.eventNumber !== undefined
       ? (body.eventNumber || null)
       : (existing.gas_drop_time ?? null)
   }
-  updates.battalion = body.battalion !== undefined ? body.battalion : (existing.battalion ?? '')
+  updates.battalion = body.battalion !== undefined
+    ? JSON.stringify(toArr2(body.battalion))
+    : (existing.battalion ?? '[]')
 
   const { data, error } = await supabase
     .from('flights').update(updates).eq('id', body.id).select().single()

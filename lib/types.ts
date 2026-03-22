@@ -9,8 +9,8 @@ export interface Mission {
   id: string
   date: string
   name: string
-  battalion: string
-  observer: string
+  battalion: string[]
+  observer: string[]
   missionNumber: number
   createdAt: string
 }
@@ -27,10 +27,10 @@ export interface Flight {
   startTime: string
   endTime: string
   duration: number // minutes
-  observer: string
+  observer: string[]
   gasDropped: boolean
   eventNumber: string // free-text event number for gas drops (stored in gas_drop_time column)
-  battalion: string   // גדוד
+  battalion: string[]   // גדוד
 }
 
 export interface FlightDB {

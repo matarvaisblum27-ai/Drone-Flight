@@ -5,14 +5,25 @@ import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
+function parseArray(val: unknown): string[] {
+  if (!val) return []
+  const s = String(val).trim()
+  if (!s) return []
+  try {
+    const parsed = JSON.parse(s)
+    if (Array.isArray(parsed)) return parsed.filter(Boolean)
+  } catch {}
+  return [s]
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToMission(row: any): Mission {
   return {
     id:            row.id,
     date:          row.date,
     name:          row.name,
-    battalion:     row.battalion     ?? '',
-    observer:      row.observer      ?? '',
+    battalion:     parseArray(row.battalion),
+    observer:      parseArray(row.observer),
     missionNumber: row.mission_number ?? 1,
     createdAt:     row.created_at    ?? '',
   }
@@ -50,12 +61,13 @@ export async function POST(req: NextRequest) {
 
   const missionNumber = (count ?? 0) + 1
 
+  const toArr = (v: unknown) => Array.isArray(v) ? v : (v ? [String(v)] : [])
   const record = {
     id:             `ms${Date.now()}`,
     date:           body.date,
     name:           body.name,
-    battalion:      body.battalion ?? '',
-    observer:       body.observer  ?? '',
+    battalion:      JSON.stringify(toArr(body.battalion)),
+    observer:       JSON.stringify(toArr(body.observer)),
     mission_number: missionNumber,
   }
 

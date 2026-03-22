@@ -89,8 +89,8 @@ function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel
     const uniquePilotIds = Array.from(new Set(mission.flights.map(f => f.pilotId)))
     const pilot1 = pilotMap.get(uniquePilotIds[0])
     const pilot2 = uniquePilotIds[1] ? pilotMap.get(uniquePilotIds[1]) : undefined
-    const observer = mission.flights.find(f => f.observer)?.observer ?? ''
-    const battalion = mission.flights.find(f => f.battalion)?.battalion ?? ''
+    const observer = mission.flights.find(f => f.observer.length > 0)?.observer.join(', ') ?? ''
+    const battalion = mission.flights.find(f => f.battalion.length > 0)?.battalion.join(', ') ?? ''
     // Mission header row
     rows.push([headerLabel(mission), date, mission.missionName, battalion, pilot1?.name ?? '', pilot1?.license ?? '', pilot2?.name ?? '', pilot2?.license ?? '', observer, ''])
     // Per-flight column headers
@@ -99,7 +99,7 @@ function buildMissionSheet(missions: MissionData[], pilots: Pilot[], headerLabel
       const f = mission.flights[i]
       if (f) {
         const p = pilotMap.get(f.pilotId)
-        rows.push([i + 1, f.startTime, f.endTime, f.pilotName, p?.license ?? '', f.battery, fmtDuration(f.duration), f.observer ?? '', f.gasDropped ? 'כן' : '', f.eventNumber ?? ''])
+        rows.push([i + 1, f.startTime, f.endTime, f.pilotName, p?.license ?? '', f.battery, fmtDuration(f.duration), f.observer.join(', '), f.gasDropped ? 'כן' : '', f.eventNumber ?? ''])
       } else {
         rows.push([i + 1, '', '', '', '', '', '0:00:00', '', '', ''])
       }
@@ -225,7 +225,7 @@ function ConfirmDialog({ message, onConfirm, onCancel }: {
 type EditForm = {
   pilotId: string; date: string; missionName: string; tailNumber: string
   battery: string; startTime: string; endTime: string
-  observer: string; gasDropped: boolean; eventNumber: string; battalion: string
+  observers: string[]; gasDropped: boolean; eventNumber: string; battalions: string[]
 }
 
 function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
@@ -244,10 +244,10 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
     battery:     flight.battery,
     startTime:   flight.startTime,
     endTime:     flight.endTime,
-    observer:    flight.observer    ?? '',
+    observers:   flight.observer.length > 0 ? [...flight.observer] : [''],
     gasDropped:  flight.gasDropped  ?? false,
     eventNumber: flight.eventNumber ?? '',
-    battalion:   flight.battalion   ?? '',
+    battalions:  flight.battalion.length > 0 ? [...flight.battalion] : [''],
   })
   const [error, setError] = useState('')
 
@@ -332,18 +332,64 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
             <label className={labelCls}>שעת נחיתה</label>
             <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <label className={labelCls}>תצפיתן (אופציונלי)</label>
-            <input type="text" value={form.observer}
-              onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
-              placeholder="שם התצפיתן..." className={inputCls} />
+            <div className="space-y-2">
+              {form.observers.map((obs, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input type="text" value={obs}
+                    onChange={e => {
+                      const observers = [...form.observers]
+                      observers[idx] = e.target.value
+                      setForm(f => ({ ...f, observers }))
+                    }}
+                    placeholder="שם התצפיתן..." className={`${inputCls} flex-1`} />
+                  {idx > 0 && (
+                    <button type="button"
+                      onClick={() => setForm(f => ({ ...f, observers: f.observers.filter((_, i) => i !== idx) }))}
+                      className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                      −
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button"
+                onClick={() => setForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                + הוסף תצפיתן
+              </button>
+            </div>
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <label className={labelCls}>גדוד (אופציונלי)</label>
-            <select value={form.battalion} onChange={e => setForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
-              <option value="">— בחר גדוד —</option>
-              {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
+            <div className="space-y-2">
+              {form.battalions.map((bat, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <select value={bat}
+                    onChange={e => {
+                      const battalions = [...form.battalions]
+                      battalions[idx] = e.target.value
+                      setForm(f => ({ ...f, battalions }))
+                    }}
+                    className={`${inputCls} flex-1`}>
+                    <option value="">— בחר גדוד —</option>
+                    {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  {idx > 0 && (
+                    <button type="button"
+                      onClick={() => setForm(f => ({ ...f, battalions: f.battalions.filter((_, i) => i !== idx) }))}
+                      className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                      −
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button"
+                onClick={() => setForm(f => ({ ...f, battalions: [...f.battalions, ''] }))}
+                className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                + הוסף גדוד
+              </button>
+            </div>
           </div>
           {(form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg') && (
             <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
@@ -624,7 +670,7 @@ export default function AdminDashboard() {
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
-    observer: '', gasDropped: false, eventNumber: '', battalion: '',
+    observers: [''], gasDropped: false, eventNumber: '', battalions: [''],
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
@@ -735,7 +781,7 @@ export default function AdminDashboard() {
   // Battalion breakdown (all-time)
   const battalionCounts: Record<string, number> = {}
   BATTALIONS.forEach(b => { battalionCounts[b] = 0 })
-  db.flights.forEach(f => { if (f.battalion && battalionCounts[f.battalion] !== undefined) battalionCounts[f.battalion]++ })
+  db.flights.forEach(f => { f.battalion.forEach(b => { if (b && battalionCounts[b] !== undefined) battalionCounts[b]++ }) })
   const maxBattalionCount = Math.max(...Object.values(battalionCounts), 1)
 
   // Drone minutes YTD + monthly breakdown
@@ -824,8 +870,8 @@ export default function AdminDashboard() {
         pilotId, pilotName: pilot.name, date,
         missionName: addForm.missionName, tailNumber: addForm.tailNumber, battery: addForm.battery,
         startTime, endTime, duration,
-        observer: addForm.observer, gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
-        battalion: addForm.battalion,
+        observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
+        battalion: addForm.battalions.filter(Boolean),
       }),
     })
     if (!res.ok) {
@@ -833,7 +879,7 @@ export default function AdminDashboard() {
       setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '', battalion: '' })
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''] })
     fetchDB()
   }
 
@@ -853,8 +899,8 @@ export default function AdminDashboard() {
         id: editFlight.id, pilotId: form.pilotId, pilotName: pilot.name,
         date: form.date, missionName: form.missionName, tailNumber: form.tailNumber,
         battery: form.battery, startTime: form.startTime, endTime: form.endTime, duration,
-        observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber,
-        battalion: form.battalion,
+        observer: form.observers.filter(Boolean), gasDropped: form.gasDropped, eventNumber: form.eventNumber,
+        battalion: form.battalions.filter(Boolean),
       }),
     })
     setEditFlight(null)
@@ -1247,9 +1293,9 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
               {/* Mobile + desktop: unified clickable cards */}
               <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" dir="rtl">
-                {DRONES.map(drone => {
+                {dronesForSelect.map(drone => {
                   const ytdMins = droneYTDMins[drone.tailNumber] ?? 0
-                  const maxYTD = Math.max(...DRONES.map(d => droneYTDMins[d.tailNumber] ?? 0), 1)
+                  const maxYTD = Math.max(...dronesForSelect.map(d => droneYTDMins[d.tailNumber] ?? 0), 1)
                   const pct = ytdMins / maxYTD
                   const isGas = GAS_TAIL_NUMBERS.includes(drone.tailNumber)
                   const lastGasDrop = isGas
@@ -1650,18 +1696,64 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <label className={labelCls}>שעת נחיתה</label>
                 <input type="time" value={addForm.endTime} onChange={e => setAddForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <label className={labelCls}>תצפיתן (אופציונלי)</label>
-                <input type="text" value={addForm.observer}
-                  onChange={e => setAddForm(f => ({ ...f, observer: e.target.value }))}
-                  placeholder="שם התצפיתן..." className={inputCls} />
+                <div className="space-y-2">
+                  {addForm.observers.map((obs, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <input type="text" value={obs}
+                        onChange={e => {
+                          const observers = [...addForm.observers]
+                          observers[idx] = e.target.value
+                          setAddForm(f => ({ ...f, observers }))
+                        }}
+                        placeholder="שם התצפיתן..." className={`${inputCls} flex-1`} />
+                      {idx > 0 && (
+                        <button type="button"
+                          onClick={() => setAddForm(f => ({ ...f, observers: f.observers.filter((_, i) => i !== idx) }))}
+                          className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                          −
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setAddForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                    + הוסף תצפיתן
+                  </button>
+                </div>
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <label className={labelCls}>גדוד (אופציונלי)</label>
-                <select value={addForm.battalion} onChange={e => setAddForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
-                  <option value="">— בחר גדוד —</option>
-                  {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
+                <div className="space-y-2">
+                  {addForm.battalions.map((bat, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <select value={bat}
+                        onChange={e => {
+                          const battalions = [...addForm.battalions]
+                          battalions[idx] = e.target.value
+                          setAddForm(f => ({ ...f, battalions }))
+                        }}
+                        className={`${inputCls} flex-1`}>
+                        <option value="">— בחר גדוד —</option>
+                        {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                      {idx > 0 && (
+                        <button type="button"
+                          onClick={() => setAddForm(f => ({ ...f, battalions: f.battalions.filter((_, i) => i !== idx) }))}
+                          className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                          −
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setAddForm(f => ({ ...f, battalions: [...f.battalions, ''] }))}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                    + הוסף גדוד
+                  </button>
+                </div>
               </div>
               {(addForm.tailNumber === '4x-ujs' || addForm.tailNumber === '4x-xpg') && (
                 <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
@@ -1719,13 +1811,12 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
                 {/* Mission header */}
                 <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3 flex-wrap">
-                  <span className="text-indigo-400 text-sm font-bold shrink-0">📋 משימה {group.missionNum}</span>
                   <span className="text-white text-sm font-semibold truncate flex-1">
-                    {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
+                    📋 {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                   </span>
                   <span className="text-xs text-slate-400 shrink-0">{new Date(group.date).toLocaleDateString('he-IL')}</span>
-                  {group.flights[0]?.battalion && (
-                    <span className="text-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 px-2 py-0.5 rounded-md shrink-0">{group.flights[0].battalion}</span>
+                  {group.flights[0]?.battalion.length > 0 && (
+                    <span className="text-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 px-2 py-0.5 rounded-md shrink-0">{group.flights[0].battalion.join(', ')}</span>
                   )}
                   {group.totalMinutes > 0 && (
                     <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
@@ -1784,7 +1875,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           title={isFlightComplete(f) ? undefined : `חסרים: ${missingFields(f).join(', ')}`}>
                           <td className="px-4 py-3 text-slate-500 text-xs">טיסה {fi + 1}</td>
                           <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
-                          <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{f.observer.length > 0 ? f.observer.join(', ') : '—'}</td>
                           <td className="px-4 py-3 text-slate-400 font-mono text-xs">{droneLabel(f.tailNumber)}</td>
                           <td className="px-4 py-3 text-xs">
                             {f.gasDropped

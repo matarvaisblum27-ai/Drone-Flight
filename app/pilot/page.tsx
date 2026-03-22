@@ -196,7 +196,7 @@ export default function PilotDashboard() {
 
   // ── Mission step (step 1) ─────────────────────────────────────────────────
   const [addStep, setAddStep] = useState<'mission' | 'flight'>('mission')
-  const [missionForm, setMissionForm] = useState({ date: '', name: '', battalion: '', observer: '' })
+  const [missionForm, setMissionForm] = useState({ date: '', name: '', battalions: [''], observers: [''] })
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
   const [similarMission, setSimilarMission] = useState<Mission | null>(null) // pending join dialog
   // missionPick: '' = nothing picked yet, 'new' = create new, otherwise = existing mission name
@@ -285,7 +285,7 @@ export default function PilotDashboard() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             date: missionForm.date, name: missionPick,
-            battalion: repFlight?.battalion ?? '', observer: repFlight?.observer ?? '',
+            battalion: repFlight?.battalion ?? [], observer: repFlight?.observer ?? [],
           }),
         })
         if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
@@ -320,7 +320,7 @@ export default function PilotDashboard() {
       )
       const virtualMissions: Mission[] = legacyNames.map((name, i) => ({
         id: '', date: missionForm.date, name,
-        battalion: '', observer: '', missionNumber: i + 1, createdAt: '',
+        battalion: [], observer: [], missionNumber: i + 1, createdAt: '',
       }))
 
       // 3) Find fuzzy match among all candidates
@@ -350,7 +350,7 @@ export default function PilotDashboard() {
   const createMissionAndProceed = async () => {
     const res = await fetch('/api/missions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalion, observer: missionForm.observer }),
+      body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalions.filter(Boolean), observer: missionForm.observers.filter(Boolean) }),
     })
     if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
     const mission: Mission = await res.json()
@@ -401,7 +401,7 @@ export default function PilotDashboard() {
 
   const resetAddFlow = () => {
     setAddStep('mission')
-    setMissionForm({ date: '', name: '', battalion: '', observer: '' })
+    setMissionForm({ date: '', name: '', battalions: [''], observers: [''] })
     setSelectedMission(null)
     setSimilarMission(null)
     setMissionPick('')
@@ -551,7 +551,7 @@ export default function PilotDashboard() {
                       <div>
                         <p className="text-sm font-medium text-white">{f.missionName || '—'}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)}{f.battery ? ` · סוללה ${f.battery}` : ''}{f.observer ? ` · 👁 ${f.observer}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}</span> : ''}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)}{f.battery ? ` · סוללה ${f.battery}` : ''}{f.observer.length > 0 ? ` · 👁 ${f.observer.join(', ')}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}</span> : ''}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
@@ -585,7 +585,7 @@ export default function PilotDashboard() {
                     <p className="text-sm font-semibold text-indigo-300">{similarMission.name}</p>
                     <p className="text-xs text-slate-400 mt-1">
                       משימה {similarMission.missionNumber} · {new Date(similarMission.date).toLocaleDateString('he-IL')}
-                      {similarMission.battalion ? ` · ${similarMission.battalion}` : ''}
+                      {similarMission.battalion.length > 0 ? ` · ${similarMission.battalion.join(', ')}` : ''}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -654,18 +654,64 @@ export default function PilotDashboard() {
                           onChange={e => setMissionForm(f => ({ ...f, name: e.target.value }))}
                           className={inputCls} />
                       </div>
-                      <div>
+                      <div className="sm:col-span-2">
                         <label className={labelCls}>גדוד (אופציונלי)</label>
-                        <select value={missionForm.battalion} onChange={e => setMissionForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
-                          <option value="">— בחר גדוד —</option>
-                          {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                        </select>
+                        <div className="space-y-2">
+                          {missionForm.battalions.map((bat, idx) => (
+                            <div key={idx} className="flex gap-2 items-center">
+                              <select value={bat}
+                                onChange={e => {
+                                  const battalions = [...missionForm.battalions]
+                                  battalions[idx] = e.target.value
+                                  setMissionForm(f => ({ ...f, battalions }))
+                                }}
+                                className={`${inputCls} flex-1`}>
+                                <option value="">— בחר גדוד —</option>
+                                {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                              </select>
+                              {idx > 0 && (
+                                <button type="button"
+                                  onClick={() => setMissionForm(f => ({ ...f, battalions: f.battalions.filter((_, i) => i !== idx) }))}
+                                  className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                                  −
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          <button type="button"
+                            onClick={() => setMissionForm(f => ({ ...f, battalions: [...f.battalions, ''] }))}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                            + הוסף גדוד
+                          </button>
+                        </div>
                       </div>
                       <div className="sm:col-span-2">
                         <label className={labelCls}>תצפיתן (אופציונלי)</label>
-                        <input type="text" value={missionForm.observer}
-                          onChange={e => setMissionForm(f => ({ ...f, observer: e.target.value }))}
-                          placeholder="שם התצפיתן..." className={inputCls} />
+                        <div className="space-y-2">
+                          {missionForm.observers.map((obs, idx) => (
+                            <div key={idx} className="flex gap-2 items-center">
+                              <input type="text" value={obs}
+                                onChange={e => {
+                                  const observers = [...missionForm.observers]
+                                  observers[idx] = e.target.value
+                                  setMissionForm(f => ({ ...f, observers }))
+                                }}
+                                placeholder="שם התצפיתן..." className={`${inputCls} flex-1`} />
+                              {idx > 0 && (
+                                <button type="button"
+                                  onClick={() => setMissionForm(f => ({ ...f, observers: f.observers.filter((_, i) => i !== idx) }))}
+                                  className="px-2.5 py-2 text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 rounded-lg transition-all font-bold flex-shrink-0">
+                                  −
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          <button type="button"
+                            onClick={() => setMissionForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                            + הוסף תצפיתן
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -693,8 +739,8 @@ export default function PilotDashboard() {
                     <p className="text-sm font-semibold text-white truncate">{selectedMission.name}</p>
                     <p className="text-xs text-indigo-300/80">
                       משימה {selectedMission.missionNumber} · {new Date(selectedMission.date).toLocaleDateString('he-IL')}
-                      {selectedMission.battalion ? ` · ${selectedMission.battalion}` : ''}
-                      {selectedMission.observer ? ` · תצפיתן: ${selectedMission.observer}` : ''}
+                      {selectedMission.battalion.length > 0 ? ` · ${selectedMission.battalion.join(', ')}` : ''}
+                      {selectedMission.observer.length > 0 ? ` · תצפיתן: ${selectedMission.observer.join(', ')}` : ''}
                     </p>
                   </div>
                   <button onClick={resetAddFlow} className="text-slate-500 hover:text-slate-300 text-xs shrink-0">שנה משימה</button>
@@ -833,9 +879,8 @@ export default function PilotDashboard() {
                 <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
                   {/* Mission header */}
                   <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
-                    <span className="text-indigo-400 text-sm font-bold">📋 משימה {group.missionNum}</span>
                     <span className="text-white text-sm font-semibold truncate flex-1">
-                      {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
+                      📋 {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                     </span>
                     <span className="text-xs text-slate-400 shrink-0">
                       {new Date(group.date).toLocaleDateString('he-IL')}
@@ -865,7 +910,7 @@ export default function PilotDashboard() {
                               <span>✈️ {droneLabel(f.tailNumber)}</span>
                               {f.battery && <span>🔋 {f.battery}</span>}
                               {f.startTime && f.endTime && <span>🕐 {f.startTime}–{f.endTime}</span>}
-                              {f.observer && <span>👁 {f.observer}</span>}
+                              {f.observer.length > 0 && <span>👁 {f.observer.join(', ')}</span>}
                               {f.gasDropped && (
                                 <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
                                   💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}
