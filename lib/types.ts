@@ -5,12 +5,23 @@ export interface Pilot {
   isAdmin?: boolean
 }
 
+export interface Mission {
+  id: string
+  date: string
+  name: string
+  battalion: string
+  observer: string
+  missionNumber: number
+  createdAt: string
+}
+
 export interface Flight {
   id: string
   pilotId: string
   pilotName: string
   date: string
   missionName: string
+  missionId?: string  // links to missions table (undefined for legacy flights)
   tailNumber: string
   battery: string
   startTime: string

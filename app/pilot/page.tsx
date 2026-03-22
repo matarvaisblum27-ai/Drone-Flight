@@ -1,11 +1,73 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, DroneBattery, isFlightComplete, missingFields } from '@/lib/types'
+import { FlightDB, DroneBattery, Mission, Flight, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
+
+// ── Fuzzy mission matching ────────────────────────────────────────────────────
+function normMission(s: string): string {
+  // Remove spaces, punctuation, Hebrew geresh/gershayim
+  return s.replace(/[\s'".,\-_/\\`׳״]/g, '')
+}
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0)
+  )
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+  return dp[m][n]
+}
+function isSimilarMission(a: string, b: string): boolean {
+  const na = normMission(a), nb = normMission(b)
+  if (!na || !nb) return false
+  if (na === nb) return true
+  const maxLen = Math.max(na.length, nb.length)
+  return levenshtein(na, nb) <= Math.max(2, Math.floor(maxLen * 0.3))
+}
+
+// ── Mission grouping for history ──────────────────────────────────────────────
+interface MissionGroup {
+  key: string; date: string; missionName: string; missionNum: number
+  flights: Flight[]; totalMinutes: number
+}
+function buildMissionGroups(flights: Flight[]): MissionGroup[] {
+  const getKey = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
+  // Chronological pass to assign mission numbers per day
+  const chrono = [...flights].sort((a, b) =>
+    a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || '')
+  )
+  const keyToNum: Record<string, number> = {}
+  const dayCount: Record<string, number> = {}
+  for (const f of chrono) {
+    const key = getKey(f)
+    if (!(key in keyToNum)) {
+      dayCount[f.date] = (dayCount[f.date] || 0) + 1
+      keyToNum[key] = dayCount[f.date]
+    }
+  }
+  // Build groups (newest-date-first order)
+  const groups = new Map<string, MissionGroup>()
+  for (const f of [...flights].sort((a, b) =>
+    b.date.localeCompare(a.date) || (b.startTime || '').localeCompare(a.startTime || '')
+  )) {
+    const key = getKey(f)
+    if (!groups.has(key)) {
+      groups.set(key, { key, date: f.date, missionName: f.missionName, missionNum: keyToNum[key] ?? 1, flights: [], totalMinutes: 0 })
+    }
+    const g = groups.get(key)!
+    g.flights.push(f)
+    g.totalMinutes += f.duration
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    const d = b.date.localeCompare(a.date)
+    return d !== 0 ? d : b.missionNum - a.missionNum
+  })
+}
 
 function ConfirmDialog({ message, onConfirm, onCancel }: {
   message: string; onConfirm: () => void; onCancel: () => void
@@ -136,10 +198,19 @@ export default function PilotDashboard() {
   const [db, setDb] = useState<FlightDB | null>(null)
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
-  const [form, setForm] = useState({
-    date: '', missionName: '', tailNumber: '4x-pzk',
-    battery: '', startTime: '', endTime: '',
-    observer: '', gasDropped: false, eventNumber: '', battalion: '',
+
+  // ── Mission step (step 1) ─────────────────────────────────────────────────
+  const [addStep, setAddStep] = useState<'mission' | 'flight'>('mission')
+  const [missionForm, setMissionForm] = useState({ date: '', name: '', battalion: '', observer: '' })
+  const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
+  const [similarMission, setSimilarMission] = useState<Mission | null>(null) // pending join dialog
+  const [missionLoading, setMissionLoading] = useState(false)
+  const [missionError, setMissionError] = useState('')
+
+  // ── Flight step (step 2) ──────────────────────────────────────────────────
+  const [flightForm, setFlightForm] = useState({
+    tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '',
+    gasDropped: false, eventNumber: '',
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -190,37 +261,88 @@ export default function PilotDashboard() {
   const totalMinutes = myFlights.reduce((a, f) => a + f.duration, 0)
   const lastFlight = myFlights[0] ?? null
 
+  // ── Step 1: find or create mission ────────────────────────────────────────
+  const handleMissionContinue = async () => {
+    setMissionError('')
+    if (!missionForm.date) { setMissionError('תאריך הוא שדה חובה'); return }
+    if (!missionForm.name.trim()) { setMissionError('שם משימה הוא שדה חובה'); return }
+    setMissionLoading(true)
+    try {
+      const res = await fetch(`/api/missions?date=${missionForm.date}`)
+      if (!res.ok) { setMissionError('שגיאה בטעינת משימות'); return }
+      const dayMissions: Mission[] = await res.json()
+      const match = dayMissions.find(m => isSimilarMission(m.name, missionForm.name.trim()))
+      if (match) {
+        setSimilarMission(match) // show join dialog
+      } else {
+        await createMissionAndProceed()
+      }
+    } finally {
+      setMissionLoading(false)
+    }
+  }
+
+  const createMissionAndProceed = async () => {
+    const res = await fetch('/api/missions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalion, observer: missionForm.observer }),
+    })
+    if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+    const mission: Mission = await res.json()
+    setSelectedMission(mission)
+    setSimilarMission(null)
+    setAddStep('flight')
+  }
+
+  const joinExistingMission = (mission: Mission) => {
+    setSelectedMission(mission)
+    setSimilarMission(null)
+    setAddStep('flight')
+  }
+
+  // ── Step 2: save flight under mission ─────────────────────────────────────
   const handleSubmit = async () => {
     setFormError('')
     setFormSuccess('')
-    const { date, startTime, endTime } = form
-    if (!date) { setFormError('תאריך הוא שדה חובה'); return }
+    if (!selectedMission) { setFormError('שגיאה: לא נבחרה משימה'); return }
+    if (!pilot) { setFormError('שגיאה: טייס לא מזוהה'); return }
+    const { startTime, endTime } = flightForm
     if (startTime && endTime) {
       const dur = calcDuration(startTime, endTime)
       if (dur <= 0) { setFormError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
     }
-    if (!pilot) { setFormError('שגיאה: טייס לא מזוהה'); return }
-
     const duration = startTime && endTime ? calcDuration(startTime, endTime) : 0
-
     const res = await fetch('/api/flights', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pilotId: pilot.id, pilotName: pilot.name, date: form.date,
-        missionName: form.missionName, tailNumber: form.tailNumber,
-        battery: form.battery, startTime, endTime, duration,
-        observer: form.observer, gasDropped: form.gasDropped, eventNumber: form.eventNumber, battalion: form.battalion,
+        pilotId: pilot.id, pilotName: pilot.name,
+        date: selectedMission.date, missionName: selectedMission.name,
+        missionId: selectedMission.id,
+        tailNumber: flightForm.tailNumber, battery: flightForm.battery,
+        startTime, endTime, duration,
+        observer: selectedMission.observer,
+        gasDropped: flightForm.gasDropped, eventNumber: flightForm.eventNumber,
+        battalion: selectedMission.battalion,
       }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד לעדכון בסיס הנתונים' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
+      setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setForm({ date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observer: '', gasDropped: false, eventNumber: '', battalion: '' })
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' })
     fetchDB()
-    setTimeout(() => setActiveTab('history'), 1200)
+  }
+
+  const resetAddFlow = () => {
+    setAddStep('mission')
+    setMissionForm({ date: '', name: '', battalion: '', observer: '' })
+    setSelectedMission(null)
+    setSimilarMission(null)
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' })
+    setFormError('')
+    setFormSuccess('')
+    setMissionError('')
   }
 
   const handleDelete = async (id: string) => {
@@ -232,7 +354,7 @@ export default function PilotDashboard() {
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
-  const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
+  const durationPreview = flightForm.startTime && flightForm.endTime ? calcDuration(flightForm.startTime, flightForm.endTime) : null
 
   return (
     <div className="min-h-screen bg-slate-900">
@@ -380,141 +502,223 @@ export default function PilotDashboard() {
 
         {/* ADD FLIGHT TAB */}
         {activeTab === 'add' && (
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-white mb-6 flex items-center gap-2">
-              <span className="text-blue-400">✈️</span> רישום טיסה חדשה
-            </h2>
-            <p className="text-xs text-slate-500 mb-4">שדות חובה: תאריך. שאר השדות ניתן להשלים מאוחר יותר.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={labelCls}>תאריך <span className="text-red-400">*</span></label>
-                <input type="date" value={form.date}
-                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                  className={inputCls} />
+          <div className="space-y-4">
+            {/* Join-existing-mission dialog */}
+            {similarMission && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSimilarMission(null)} />
+                <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center flex-shrink-0 text-lg">📋</div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">נמצאה משימה דומה</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">להצטרף למשימה קיימת?</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-700/50 border border-slate-600/40 rounded-xl p-3 mb-5">
+                    <p className="text-sm font-semibold text-indigo-300">{similarMission.name}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      משימה {similarMission.missionNumber} · {new Date(similarMission.date).toLocaleDateString('he-IL')}
+                      {similarMission.battalion ? ` · ${similarMission.battalion}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => createMissionAndProceed()}
+                      className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">
+                      צור משימה חדשה
+                    </button>
+                    <button onClick={() => joinExistingMission(similarMission)}
+                      className="flex-1 px-4 py-2.5 text-sm text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all font-medium">
+                      הצטרף למשימה
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className={labelCls}>שם משימה</label>
-                <input type="text" placeholder="סיור לילי, תרגיל..." value={form.missionName}
-                  onChange={e => setForm(f => ({ ...f, missionName: e.target.value }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>מספר זנב</label>
-                <select value={form.tailNumber}
-                  onChange={e => setForm(f => ({ ...f, tailNumber: e.target.value, battery: '' }))}
-                  className={inputCls}>
-                  {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>סוללה</label>
-                {(() => {
-                  const bats = droneBatteries.filter(b => b.droneTailNumber === form.tailNumber)
-                  if (bats.length === 0) return (
-                    <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
-                      <option>אין סוללות רשומות לרחפן זה</option>
+            )}
+
+            {/* Step 1: Mission details */}
+            {addStep === 'mission' && (
+              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+                <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                  <span className="text-indigo-400">📋</span> שלב 1 — פרטי המשימה
+                </h2>
+                <p className="text-xs text-slate-500 mb-5">הגדר את המשימה. אחר כך תוסיף את פרטי הטיסה.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>תאריך <span className="text-red-400">*</span></label>
+                    <input type="date" value={missionForm.date}
+                      onChange={e => setMissionForm(f => ({ ...f, date: e.target.value }))}
+                      className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>שם משימה <span className="text-red-400">*</span></label>
+                    <input type="text" placeholder="מפ שועפט, חיפוי כוחות..." value={missionForm.name}
+                      onChange={e => setMissionForm(f => ({ ...f, name: e.target.value }))}
+                      className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>גדוד (אופציונלי)</label>
+                    <select value={missionForm.battalion} onChange={e => setMissionForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
+                      <option value="">— בחר גדוד —</option>
+                      {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
-                  )
-                  return (
-                    <select value={form.battery} onChange={e => setForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
-                      <option value="">— בחר סוללה —</option>
-                      {bats.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+                  </div>
+                  <div>
+                    <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                    <input type="text" value={missionForm.observer}
+                      onChange={e => setMissionForm(f => ({ ...f, observer: e.target.value }))}
+                      placeholder="שם התצפיתן..." className={inputCls} />
+                  </div>
+                </div>
+                {missionError && (
+                  <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{missionError}</div>
+                )}
+                <button onClick={handleMissionContinue} disabled={missionLoading}
+                  className="mt-5 w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                  {missionLoading ? 'בודק...' : 'המשך לפרטי הטיסה'}
+                  {!missionLoading && <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
+                </button>
+              </div>
+            )}
+
+            {/* Step 2: Flight details */}
+            {addStep === 'flight' && selectedMission && (
+              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+                {/* Mission banner */}
+                <div className="bg-indigo-900/30 border border-indigo-700/40 rounded-xl px-4 py-3 mb-5 flex items-center gap-3">
+                  <span className="text-indigo-400 text-lg">📋</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{selectedMission.name}</p>
+                    <p className="text-xs text-indigo-300/80">
+                      משימה {selectedMission.missionNumber} · {new Date(selectedMission.date).toLocaleDateString('he-IL')}
+                      {selectedMission.battalion ? ` · ${selectedMission.battalion}` : ''}
+                      {selectedMission.observer ? ` · תצפיתן: ${selectedMission.observer}` : ''}
+                    </p>
+                  </div>
+                  <button onClick={resetAddFlow} className="text-slate-500 hover:text-slate-300 text-xs shrink-0">שנה משימה</button>
+                </div>
+
+                <h2 className="text-sm font-semibold text-white mb-5 flex items-center gap-2">
+                  <span className="text-blue-400">✈️</span> שלב 2 — פרטי הטיסה
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>מספר זנב</label>
+                    <select value={flightForm.tailNumber}
+                      onChange={e => setFlightForm(f => ({ ...f, tailNumber: e.target.value, battery: '' }))}
+                      className={inputCls}>
+                      {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                     </select>
-                  )
-                })()}
-              </div>
-              <div>
-                <label className={labelCls}>שעת המראה</label>
-                <input type="time" value={form.startTime}
-                  onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>שעת נחיתה</label>
-                <input type="time" value={form.endTime}
-                  onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>תצפיתן (אופציונלי)</label>
-                <input type="text" value={form.observer}
-                  onChange={e => setForm(f => ({ ...f, observer: e.target.value }))}
-                  placeholder="שם התצפיתן..." className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>גדוד (אופציונלי)</label>
-                <select value={form.battalion} onChange={e => setForm(f => ({ ...f, battalion: e.target.value }))} className={inputCls}>
-                  <option value="">— בחר גדוד —</option>
-                  {BATTALIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-              {(form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg') && (
-                <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={form.gasDropped}
-                      onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, eventNumber: e.target.checked ? f.eventNumber : '' }))}
-                      className="w-4 h-4 accent-amber-500" />
-                    <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
-                  </label>
-                  {form.gasDropped && (
-                    <div className="mt-3">
-                      <label className="block text-xs font-medium text-amber-400/80 mb-1.5">מספר אירוע</label>
-                      <input type="text" value={form.eventNumber}
-                        onChange={e => setForm(f => ({ ...f, eventNumber: e.target.value }))}
-                        placeholder="מס׳ אירוע..." className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>סוללה</label>
+                    {(() => {
+                      const bats = droneBatteries.filter(b => b.droneTailNumber === flightForm.tailNumber)
+                      if (bats.length === 0) return (
+                        <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
+                          <option>אין סוללות רשומות לרחפן זה</option>
+                        </select>
+                      )
+                      return (
+                        <select value={flightForm.battery} onChange={e => setFlightForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
+                          <option value="">— בחר סוללה —</option>
+                          {bats.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+                        </select>
+                      )
+                    })()}
+                  </div>
+                  <div>
+                    <label className={labelCls}>שעת המראה</label>
+                    <input type="time" value={flightForm.startTime}
+                      onChange={e => setFlightForm(f => ({ ...f, startTime: e.target.value }))}
+                      className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>שעת נחיתה</label>
+                    <input type="time" value={flightForm.endTime}
+                      onChange={e => setFlightForm(f => ({ ...f, endTime: e.target.value }))}
+                      className={inputCls} />
+                  </div>
+                  {(flightForm.tailNumber === '4x-ujs' || flightForm.tailNumber === '4x-xpg') && (
+                    <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={flightForm.gasDropped}
+                          onChange={e => setFlightForm(f => ({ ...f, gasDropped: e.target.checked, eventNumber: e.target.checked ? f.eventNumber : '' }))}
+                          className="w-4 h-4 accent-amber-500" />
+                        <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
+                      </label>
+                      {flightForm.gasDropped && (
+                        <div className="mt-3">
+                          <label className="block text-xs font-medium text-amber-400/80 mb-1.5">מספר אירוע</label>
+                          <input type="text" value={flightForm.eventNumber}
+                            onChange={e => setFlightForm(f => ({ ...f, eventNumber: e.target.value }))}
+                            placeholder="מס׳ אירוע..." className={inputCls} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
 
-            {/* Duration preview */}
-            {durationPreview !== null && durationPreview > 0 && (
-              <div className="mt-4 bg-blue-900/20 border border-blue-700/40 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                משך טיסה מחושב: <strong>{fmtHours(durationPreview)}</strong> ({durationPreview} דקות)
+                {/* Duration preview */}
+                {durationPreview !== null && durationPreview > 0 && (
+                  <div className="mt-4 bg-blue-900/20 border border-blue-700/40 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    משך טיסה מחושב: <strong>{fmtHours(durationPreview)}</strong> ({durationPreview} דקות)
+                  </div>
+                )}
+
+                {formError && (
+                  <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{formError}</div>
+                )}
+                {formSuccess ? (
+                  <div className="mt-5 space-y-3">
+                    <div className="bg-green-900/20 border border-green-700/40 rounded-lg px-4 py-3 text-sm text-green-400 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                      {formSuccess}
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' }) }}
+                        className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
+                        טיסה נוספת למשימה זו
+                      </button>
+                      <button onClick={() => { resetAddFlow(); setActiveTab('history') }}
+                        className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all">
+                        לדף היסטוריה
+                      </button>
+                    </div>
+                    <button onClick={resetAddFlow}
+                      className="w-full px-4 py-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
+                      משימה חדשה
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={handleSubmit}
+                    className="mt-6 w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    רשום טיסה
+                  </button>
+                )}
               </div>
             )}
-
-            {formError && (
-              <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">
-                {formError}
-              </div>
-            )}
-            {formSuccess && (
-              <div className="mt-4 bg-green-900/20 border border-green-700/40 rounded-lg px-4 py-3 text-sm text-green-400 flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                {formSuccess}
-              </div>
-            )}
-
-            <button
-              onClick={handleSubmit}
-              className="mt-6 w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              רשום טיסה
-            </button>
           </div>
         )}
 
         {/* HISTORY TAB */}
         {activeTab === 'history' && (
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
-            <div className="p-6 border-b border-slate-700/50">
+          <div className="space-y-4">
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl px-6 py-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                <span className="text-blue-400">📜</span> היסטוריית טיסות שלי ({myFlights.length})
+                <span className="text-blue-400">📜</span> היסטוריית טיסות שלי
               </h2>
+              <span className="text-xs text-slate-400">{myFlights.length} טיסות</span>
             </div>
             {myFlights.length === 0 ? (
-              <div className="p-12 text-center">
+              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-12 text-center">
                 <div className="text-4xl mb-3">✈️</div>
                 <p className="text-slate-400">אין טיסות רשומות עדיין</p>
                 <button onClick={() => setActiveTab('add')}
@@ -523,56 +727,68 @@ export default function PilotDashboard() {
                 </button>
               </div>
             ) : (
-              <div className="divide-y divide-slate-700/30">
-                {myFlights.map((f, i) => {
-                  const complete = isFlightComplete(f)
-                  const missing = complete ? [] : missingFields(f)
-                  return (
-                    <div key={f.id}
-                      className={`px-6 py-4 transition-colors flex items-start justify-between gap-4 ${complete ? 'hover:bg-slate-700/20' : 'bg-red-900/20 hover:bg-red-900/30'}`}
-                      title={complete ? undefined : `חסרים: ${missing.join(', ')}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs text-slate-500">#{myFlights.length - i}</span>
-                          <h3 className="text-sm font-semibold text-white truncate">{f.missionName || <span className="text-red-400 italic">ללא שם משימה</span>}</h3>
-                          {!complete && (
-                            <span className="text-xs bg-red-900/40 border border-red-700/50 text-red-400 px-1.5 py-0.5 rounded-md flex-shrink-0">חסר מידע</span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                          <span>📅 {new Date(f.date).toLocaleDateString('he-IL')}</span>
-                          <span>✈️ {droneLabel(f.tailNumber)}</span>
-                          {f.battery && <span>🔋 {f.battery}</span>}
-                          {f.startTime && f.endTime && <span>🕐 {f.startTime}–{f.endTime}</span>}
-                          {f.observer && <span>👁 {f.observer}</span>}
-                          {f.gasDropped && (
-                            <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
-                              💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-3 flex-shrink-0">
-                        <div className="text-right">
-                          <p className="text-base font-bold text-blue-400">{f.duration > 0 ? fmtHours(f.duration) : '—'}</p>
-                          <p className="text-xs text-slate-500">{f.duration > 0 ? `${f.duration} דק'` : ''}</p>
-                        </div>
-                        <button
-                          onClick={() => setConfirmId(f.id)}
-                          title="מחיקה"
-                          className="text-slate-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20 mt-0.5"
+              buildMissionGroups(myFlights).map((group, gi) => (
+                <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+                  {/* Mission header */}
+                  <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
+                    <span className="text-indigo-400 text-sm font-bold">📋 משימה {group.missionNum}</span>
+                    <span className="text-white text-sm font-semibold truncate flex-1">
+                      {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
+                    </span>
+                    <span className="text-xs text-slate-400 shrink-0">
+                      {new Date(group.date).toLocaleDateString('he-IL')}
+                    </span>
+                    {group.totalMinutes > 0 && (
+                      <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
+                    )}
+                  </div>
+                  {/* Flights */}
+                  <div className="divide-y divide-slate-700/30">
+                    {group.flights.map((f, fi) => {
+                      const complete = isFlightComplete(f)
+                      const missing = complete ? [] : missingFields(f)
+                      return (
+                        <div key={f.id}
+                          className={`px-5 py-3 transition-colors flex items-center justify-between gap-4 ${complete ? 'hover:bg-slate-700/20' : 'bg-red-900/20 hover:bg-red-900/30'}`}
+                          title={complete ? undefined : `חסרים: ${missing.join(', ')}`}
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs text-slate-500">טיסה {fi + 1}</span>
+                              {!complete && (
+                                <span className="text-xs bg-red-900/40 border border-red-700/50 text-red-400 px-1.5 py-0.5 rounded-md">חסר מידע</span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                              <span>✈️ {droneLabel(f.tailNumber)}</span>
+                              {f.battery && <span>🔋 {f.battery}</span>}
+                              {f.startTime && f.endTime && <span>🕐 {f.startTime}–{f.endTime}</span>}
+                              {f.observer && <span>👁 {f.observer}</span>}
+                              {f.gasDropped && (
+                                <span className="inline-flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 text-amber-400 font-medium px-2 py-0.5 rounded-md">
+                                  💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-blue-400">{f.duration > 0 ? fmtHours(f.duration) : '—'}</p>
+                            </div>
+                            <button onClick={() => setConfirmId(f.id)} title="מחיקה"
+                              className="text-slate-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         )}

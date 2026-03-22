@@ -723,8 +723,10 @@ export default function AdminDashboard() {
   const thisYear = String(now.getFullYear())
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const totalMinutes = db.flights.reduce((a, f) => a + f.duration, 0)
-  const missionsThisMonth = db.flights.filter(f => f.date.startsWith(thisMonth)).length
-  const missionsThisYear  = db.flights.filter(f => f.date.startsWith(thisYear)).length
+  // Count UNIQUE missions (not individual flights) using missionId or date+name as key
+  const missionKeyFn = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
+  const missionsThisMonth = new Set(db.flights.filter(f => f.date.startsWith(thisMonth)).map(missionKeyFn)).size
+  const missionsThisYear  = new Set(db.flights.filter(f => f.date.startsWith(thisYear)).map(missionKeyFn)).size
 
   // Battalion breakdown (all-time)
   const battalionCounts: Record<string, number> = {}
@@ -949,6 +951,39 @@ export default function AdminDashboard() {
   }
 
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
+
+  // Mission groups for history tab
+  interface AdminMissionGroup {
+    key: string; date: string; missionName: string; missionNum: number
+    flights: Flight[]; totalMinutes: number
+  }
+  const adminMissionGroups: AdminMissionGroup[] = (() => {
+    const getKey = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
+    const chrono = [...db.flights].sort((a, b) =>
+      a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || '')
+    )
+    const keyToNum: Record<string, number> = {}
+    const dayCount: Record<string, number> = {}
+    for (const f of chrono) {
+      const key = getKey(f)
+      if (!(key in keyToNum)) {
+        dayCount[f.date] = (dayCount[f.date] || 0) + 1
+        keyToNum[key] = dayCount[f.date]
+      }
+    }
+    const groups = new Map<string, AdminMissionGroup>()
+    for (const f of sortedHistory) {
+      const key = getKey(f)
+      if (!groups.has(key)) groups.set(key, { key, date: f.date, missionName: f.missionName, missionNum: keyToNum[key] ?? 1, flights: [], totalMinutes: 0 })
+      const g = groups.get(key)!
+      g.flights.push(f)
+      g.totalMinutes += f.duration
+    }
+    return Array.from(groups.values()).sort((a, b) => {
+      const d = b.date.localeCompare(a.date)
+      return d !== 0 ? d : b.missionNum - a.missionNum
+    })
+  })()
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
@@ -1632,77 +1667,84 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
         {/* HISTORY */}
         {activeTab === 'history' && (
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
-            <div className="p-6 border-b border-slate-700/50">
+          <div className="space-y-4">
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl px-6 py-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                <span className="text-blue-400">📜</span> היסטוריית טיסות ({db.flights.length})
+                <span className="text-blue-400">📜</span> היסטוריית טיסות
               </h2>
+              <span className="text-xs text-slate-400">{adminMissionGroups.length} משימות · {db.flights.length} טיסות</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-700/30 text-right">
-                    {['תאריך', 'טייס', 'משימה', 'גדוד', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', 'פעולות'].map(h => (
-                      <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/30">
-                  {sortedHistory.map(f => (
-                    <tr key={f.id} className={`transition-colors ${isFlightComplete(f) ? 'hover:bg-slate-700/20' : 'bg-red-900/20 hover:bg-red-900/30'}`}
-                      title={isFlightComplete(f) ? undefined : `חסרים: ${missingFields(f).join(', ')}`}>
-                      <td className="px-4 py-3 text-slate-300 whitespace-nowrap">
-                        {new Date(f.date).toLocaleDateString('he-IL')}
-                      </td>
-                      <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
-                      <td className="px-4 py-3 text-slate-300">{f.missionName}</td>
-                      <td className="px-4 py-3 text-xs">{f.battalion ? <span className="bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 px-2 py-0.5 rounded-md whitespace-nowrap">{f.battalion}</span> : <span className="text-slate-600">—</span>}</td>
-                      <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
-                      <td className="px-4 py-3 text-slate-400 font-mono text-xs">
-                        {droneLabel(f.tailNumber)}
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        {f.gasDropped
-                          ? <span className="text-amber-400 font-medium">✓{f.eventNumber ? ` ${f.eventNumber}` : ''}</span>
-                          : <span className="text-slate-600">—</span>
-                        }
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-400 text-xs">{f.startTime}–{f.endTime}</td>
-                      <td className="px-4 py-3 text-blue-400 font-medium whitespace-nowrap">{fmtHours(f.duration)}</td>
-                      <td className="px-4 py-3">
-                        {canEdit && (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => setEditFlight(f)}
-                              title="עריכה"
-                              className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => setConfirmId(f.id)}
-                              title="מחיקה"
-                              className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {adminMissionGroups.map(group => (
+              <div key={group.key} className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+                {/* Mission header */}
+                <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
+                  <span className="text-indigo-400 text-sm font-bold shrink-0">📋 משימה {group.missionNum}</span>
+                  <span className="text-white text-sm font-semibold truncate flex-1">
+                    {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
+                  </span>
+                  <span className="text-xs text-slate-400 shrink-0">{new Date(group.date).toLocaleDateString('he-IL')}</span>
+                  {group.flights[0]?.battalion && (
+                    <span className="text-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 px-2 py-0.5 rounded-md shrink-0">{group.flights[0].battalion}</span>
+                  )}
+                  {group.totalMinutes > 0 && (
+                    <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
+                  )}
+                </div>
+                {/* Flights table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-700/20 text-right">
+                        {['#', 'טייס', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', ...(canEdit ? ['פעולות'] : [])].map(h => (
+                          <th key={h} className="px-4 py-2 text-xs font-medium text-slate-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/30">
+                      {group.flights.map((f, fi) => (
+                        <tr key={f.id} className={`transition-colors ${isFlightComplete(f) ? 'hover:bg-slate-700/20' : 'bg-red-900/20 hover:bg-red-900/30'}`}
+                          title={isFlightComplete(f) ? undefined : `חסרים: ${missingFields(f).join(', ')}`}>
+                          <td className="px-4 py-3 text-slate-500 text-xs">טיסה {fi + 1}</td>
+                          <td className="px-4 py-3 text-white font-medium whitespace-nowrap">{f.pilotName}</td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{f.observer || '—'}</td>
+                          <td className="px-4 py-3 text-slate-400 font-mono text-xs">{droneLabel(f.tailNumber)}</td>
+                          <td className="px-4 py-3 text-xs">
+                            {f.gasDropped
+                              ? <span className="text-amber-400 font-medium">✓{f.eventNumber ? ` ${f.eventNumber}` : ''}</span>
+                              : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">{f.startTime}–{f.endTime}</td>
+                          <td className="px-4 py-3 text-blue-400 font-medium whitespace-nowrap">{fmtHours(f.duration)}</td>
+                          {canEdit && (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => setEditFlight(f)} title="עריכה"
+                                  className="text-slate-400 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20">
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button onClick={() => setConfirmId(f.id)} title="מחיקה"
+                                  className="text-slate-400 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20">
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
