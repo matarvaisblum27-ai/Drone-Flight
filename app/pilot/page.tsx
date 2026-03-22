@@ -7,36 +7,33 @@ import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'גדוד מודיעין', 'גדוד כללי']
 
-// ── Mission word-overlap matching ─────────────────────────────────────────────
-// Rule: if ANY word (2+ characters) from the new name appears in the existing
-// name → show the "להצטרף?" popup and let the user decide.
-//
-// Steps:
-//   1. Strip all punctuation (' . " - , ׳ ״) from both names
-//   2. Split into words
-//   3. If any word with 2+ chars from either name appears in the other → MATCH
-//
-// Examples:
-//   "מערך הר"     words: ["מערך","הר"]  ∩  "הר הבית"  words: ["הר","הבית"]
-//     → "הר" shared → popup ✓
-//   "מערך הר הבית" words: ["מערך","הר","הבית"]  ∩  "הר הבית" → "הר","הבית" shared → popup ✓
-//   "קלקליה"      words: ["קלקליה"]  ∩  "שועפט" words: ["שועפט"] → none shared → new mission ✓
+// ── Mission substring matching ────────────────────────────────────────────────
+// Algorithm (bidirectional substring):
+//   1. Strip all punctuation from both names
+//   2. Flatten name2 (remove all spaces) → flat string
+//   3. For each word (3+ chars) in name1, check if it appears as a substring of flat name2
+//   4. Also do the reverse: words of name2 in flat name1
+//   5. If ANY word matches → MATCH → show popup
 
-function missionWords(s: string): Set<string> {
-  return new Set(
-    s.replace(/[.'"،,\-_׳״]/g, ' ')
-     .replace(/\s+/g, ' ')
-     .trim()
-     .split(' ')
-     .filter(w => w.length >= 2)
-  )
+function flattenName(s: string): string {
+  return s.replace(/[.'"،,\-_׳״']/g, '').replace(/\s+/g, '')
 }
 
-function isSimilarMission(newName: string, existingName: string): boolean {
-  if (!newName.trim() || !existingName.trim()) return false
-  const newWords = missionWords(newName)
-  const existingWords = missionWords(existingName)
-  return Array.from(newWords).some(w => existingWords.has(w))
+function nameWords(s: string): string[] {
+  return s.replace(/[.'"،,\-_׳״']/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(w => w.length >= 3)
+}
+
+function isSimilarMission(a: string, b: string): boolean {
+  if (!a.trim() || !b.trim()) return false
+  const flatA = flattenName(a)
+  const flatB = flattenName(b)
+  const wordsA = nameWords(a)
+  const wordsB = nameWords(b)
+  // Check each word of a as substring in flat-b, and vice-versa
+  const match = wordsA.some(w => flatB.includes(w)) || wordsB.some(w => flatA.includes(w))
+  console.log('[isSimilarMission]', JSON.stringify(a), 'vs', JSON.stringify(b),
+    '→ wordsA:', wordsA, 'wordsB:', wordsB, '→ match:', match)
+  return match
 }
 
 // ── Mission grouping for history ──────────────────────────────────────────────
@@ -277,12 +274,59 @@ export default function PilotDashboard() {
     if (!missionForm.name.trim()) { setMissionError('שם משימה הוא שדה חובה'); return }
     setMissionLoading(true)
     try {
+      const typedName = missionForm.name.trim()
+      console.log('[handleMissionContinue] date:', missionForm.date, 'name:', typedName)
+
+      // 1) Check missions table (new-style missions)
       const res = await fetch(`/api/missions?date=${missionForm.date}`)
       if (!res.ok) { setMissionError('שגיאה בטעינת משימות'); return }
       const dayMissions: Mission[] = await res.json()
-      const match = dayMissions.find(m => isSimilarMission(m.name, missionForm.name.trim()))
+      console.log('[handleMissionContinue] missions table entries:', dayMissions.length, dayMissions.map(m => m.name))
+
+      // 2) Also build virtual missions from legacy flights (mission_id = null / empty)
+      //    so we can match against mission_name strings already in the DB.
+      const legacyNamesOnDate = db
+        ? [...new Set(
+            db.flights
+              .filter(f => f.date === missionForm.date && f.missionName && !f.missionId)
+              .map(f => f.missionName)
+          )]
+        : []
+      console.log('[handleMissionContinue] legacy mission names on date:', legacyNamesOnDate)
+
+      // Build virtual Mission objects for legacy flights so we can pass them to joinExistingMission
+      const virtualMissions: Mission[] = legacyNamesOnDate.map((name, i) => ({
+        id: '',            // no real mission id – will be created when joining
+        date: missionForm.date,
+        name,
+        battalion: '',
+        observer: '',
+        missionNumber: i + 1,
+        createdAt: '',
+      }))
+
+      // 3) All candidates: real missions first, then virtual legacy ones
+      const allCandidates: Mission[] = [...dayMissions, ...virtualMissions]
+      console.log('[handleMissionContinue] all candidates:', allCandidates.map(m => `"${m.name}" (id=${m.id || 'legacy'})`))
+
+      // 4) Find first match
+      const match = allCandidates.find(m => isSimilarMission(typedName, m.name))
+      console.log('[handleMissionContinue] match:', match ? `"${match.name}"` : 'none')
+
       if (match) {
-        setSimilarMission(match) // show join dialog
+        // For a legacy (virtual) mission, create a real missions-table entry first
+        if (!match.id) {
+          console.log('[handleMissionContinue] legacy match → creating missions-table entry for:', match.name)
+          const createRes = await fetch('/api/missions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: match.date, name: match.name, battalion: match.battalion, observer: match.observer }),
+          })
+          if (!createRes.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+          const realMission: Mission = await createRes.json()
+          setSimilarMission(realMission)
+        } else {
+          setSimilarMission(match)
+        }
       } else {
         await createMissionAndProceed()
       }
