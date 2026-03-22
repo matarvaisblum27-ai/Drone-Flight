@@ -676,6 +676,7 @@ export default function AdminDashboard() {
   const [addSuccess, setAddSuccess] = useState('')
   const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
   const [expandedDroneCard, setExpandedDroneCard] = useState<string | null>(null)
+  const [expandedBattalion, setExpandedBattalion] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<{ pilotId: string; model: string; type: 'ever' | 'monthly' } | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmPilotId, setConfirmPilotId] = useState<string | null>(null)
@@ -778,11 +779,35 @@ export default function AdminDashboard() {
   const missionsThisMonth = new Set(db.flights.filter(f => f.date.startsWith(thisMonth)).map(missionKeyFn)).size
   const missionsThisYear  = new Set(db.flights.filter(f => f.date.startsWith(thisYear)).map(missionKeyFn)).size
 
-  // Battalion breakdown (all-time)
+  // Battalion breakdown — unique missions (all-time for bar, YTD monthly for drill-down)
+  interface BnMissionEntry { missionKey: string; missionName: string; date: string; pilots: string[]; drones: string[] }
+  const battalionMissionSets: Record<string, Set<string>> = {}
+  BATTALIONS.forEach(b => { battalionMissionSets[b] = new Set() })
+  db.flights.forEach(f => { f.battalion.forEach(b => { if (b && battalionMissionSets[b]) battalionMissionSets[b].add(missionKeyFn(f)) }) })
   const battalionCounts: Record<string, number> = {}
-  BATTALIONS.forEach(b => { battalionCounts[b] = 0 })
-  db.flights.forEach(f => { f.battalion.forEach(b => { if (b && battalionCounts[b] !== undefined) battalionCounts[b]++ }) })
+  BATTALIONS.forEach(b => { battalionCounts[b] = battalionMissionSets[b].size })
   const maxBattalionCount = Math.max(...Object.values(battalionCounts), 1)
+
+  // YTD monthly missions per battalion
+  const battalionMonthlyMissions: Record<string, Record<string, BnMissionEntry[]>> = {}
+  BATTALIONS.forEach(b => { battalionMonthlyMissions[b] = {} })
+  const bnYtdMap = new Map<string, { name: string; date: string; pilots: Set<string>; drones: Set<string>; battalions: Set<string> }>()
+  db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
+    const key = missionKeyFn(f)
+    if (!bnYtdMap.has(key)) bnYtdMap.set(key, { name: f.missionName, date: f.date, pilots: new Set(), drones: new Set(), battalions: new Set() })
+    const m = bnYtdMap.get(key)!
+    m.pilots.add(f.pilotName)
+    m.drones.add(f.tailNumber)
+    f.battalion.forEach(b => { if (b) m.battalions.add(b) })
+  })
+  bnYtdMap.forEach((mission, key) => {
+    const month = mission.date.slice(0, 7)
+    mission.battalions.forEach(b => {
+      if (!battalionMonthlyMissions[b]) return
+      if (!battalionMonthlyMissions[b][month]) battalionMonthlyMissions[b][month] = []
+      battalionMonthlyMissions[b][month].push({ missionKey: key, missionName: mission.name, date: mission.date, pilots: (Array.from(mission.pilots) as string[]).sort(), drones: (Array.from(mission.drones) as string[]).sort() })
+    })
+  })
 
   // Drone minutes YTD + monthly breakdown
   const droneYTDMins: Record<string, number> = {}
@@ -1218,22 +1243,88 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         </div>
 
         {/* Battalion breakdown card */}
-        <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-          <p className="text-xs text-slate-400 mb-3">התפלגות משימות לפי גדוד</p>
-          <div className="space-y-2" dir="rtl">
+        <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
+          <div className="p-5 border-b border-slate-700/50">
+            <h2 className="text-base font-semibold text-white flex items-center gap-2">
+              <span>🎖️</span> התפלגות משימות לפי גדוד
+            </h2>
+          </div>
+          <div className="p-4 space-y-2" dir="rtl">
             {BATTALIONS.map(bn => {
               const count = battalionCounts[bn] ?? 0
               const pct = maxBattalionCount > 0 ? (count / maxBattalionCount) * 100 : 0
+              const isOpen = expandedBattalion === bn
+              const monthlyData = Object.entries(battalionMonthlyMissions[bn] ?? {}).sort()
+              const ytdTotal = monthlyData.reduce((s, [, ms]) => s + ms.length, 0)
               return (
-                <div key={bn} className="flex items-center gap-3">
-                  <span className="text-xs text-slate-300 w-28 shrink-0 text-right">{bn}</span>
-                  <div className="flex-1 h-4 bg-slate-700/50 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
-                      style={{ width: `${Math.max(pct, count > 0 ? 4 : 0)}%` }}
-                    />
+                <div key={bn}>
+                  {/* Clickable bar row */}
+                  <button
+                    onClick={() => setExpandedBattalion(isOpen ? null : bn)}
+                    className={`w-full text-right bg-slate-700/40 border ${isOpen ? 'border-blue-500/50 bg-slate-700/60' : 'border-slate-600/30'} rounded-xl px-4 py-3 transition-all active:scale-[0.99]`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-300 w-28 shrink-0 text-right leading-tight">{bn}</span>
+                      <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
+                          style={{ width: `${Math.max(pct, count > 0 ? 4 : 0)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-blue-400 w-8 text-left shrink-0">{count}</span>
+                      <svg className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Expandable monthly breakdown */}
+                  <div
+                    className="overflow-hidden transition-all duration-300 ease-in-out"
+                    style={{ maxHeight: isOpen ? '4000px' : '0px', opacity: isOpen ? 1 : 0 }}
+                  >
+                    <div className="mt-2 bg-slate-900/60 border border-slate-700/40 rounded-xl p-4" dir="rtl">
+                      {monthlyData.length === 0 ? (
+                        <p className="text-sm text-slate-600 text-center py-2">אין משימות השנה</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {monthlyData.map(([month, missions]) => {
+                            const monthIdx = parseInt(month.slice(5, 7)) - 1
+                            return (
+                              <div key={month} className="bg-slate-800/50 rounded-lg p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-xs font-bold text-white">{HEBREW_MONTH_NAMES[monthIdx]}</p>
+                                  <span className="text-xs font-semibold text-blue-400">{missions.length} משימות</span>
+                                </div>
+                                <div className="space-y-2">
+                                  {missions.sort((a, b) => a.date.localeCompare(b.date)).map(ms => (
+                                    <div key={ms.missionKey} className="bg-slate-700/40 rounded-lg px-3 py-2">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <p className="text-xs font-semibold text-indigo-300 leading-snug">{ms.missionName || <span className="text-slate-500 italic">ללא שם</span>}</p>
+                                        <span className="text-[10px] text-slate-500 shrink-0">{new Date(ms.date).toLocaleDateString('he-IL')}</span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                                        {ms.pilots.length > 0 && (
+                                          <span className="text-[10px] text-slate-400">👨‍✈️ {ms.pilots.join(', ')}</span>
+                                        )}
+                                        {ms.drones.length > 0 && (
+                                          <span className="text-[10px] text-slate-400">🚁 {ms.drones.map(droneLabel).join(', ')}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                          <div className="border-t border-slate-600/50 pt-2 flex items-center justify-between">
+                            <span className="text-sm font-bold text-slate-200">סה&quot;כ שנתי</span>
+                            <span className="text-sm font-bold text-blue-400">{ytdTotal} משימות</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs font-semibold text-blue-400 w-6 text-left shrink-0">{count}</span>
                 </div>
               )
             })}
