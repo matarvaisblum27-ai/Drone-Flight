@@ -1140,6 +1140,21 @@ export default function AdminDashboard() {
     fetchGasDrops()
   }
 
+  const [battalionMigrating, setBattalionMigrating] = useState(false)
+  const handleRenameBattalions = async () => {
+    setBattalionMigrating(true)
+    const res = await fetch('/api/admin/rename-battalions', { method: 'POST' })
+    setBattalionMigrating(false)
+    if (!res.ok) { alert('שגיאה בעדכון שמות גדודים'); return }
+    const { updated, errors } = await res.json()
+    if (updated === 0) {
+      alert('אין טיסות לעדכון — כל הגדודים כבר עם השמות החדשים.')
+    } else {
+      alert(`עדכון גדודים:\n✅ ${updated} טיסות עודכנו\n❌ ${errors} שגיאות`)
+    }
+    fetchDB()
+  }
+
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
 
   // Mission groups for history tab
@@ -1685,6 +1700,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 >
                   {gasDropMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔥'}
                   סמן הטלות גז היסטוריות
+                </button>
+                <button
+                  onClick={handleRenameBattalions}
+                  disabled={battalionMigrating}
+                  className="flex items-center gap-2 bg-violet-700/80 hover:bg-violet-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-violet-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {battalionMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🎖️'}
+                  עדכן שמות גדודים
                 </button>
                 <button
                   onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
