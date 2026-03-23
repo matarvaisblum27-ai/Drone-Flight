@@ -827,6 +827,32 @@ export default function AdminDashboard() {
   // Reset history pagination when leaving the history tab
   useEffect(() => { if (activeTab !== 'history') setHistoryPage(25) }, [activeTab])
 
+  // ── History navigation (hooks must be before any early return) ────────────
+  const navigateToMission = useCallback((missionKey: string) => {
+    setHistoryPilotFilter(null)
+    setHistoryPage(9999)
+    setActiveTab('history')
+    setHighlightedKey(missionKey)
+  }, [])
+
+  const navigateToPilotHistory = useCallback((pilotName: string, month: string) => {
+    setHistoryPilotFilter({ pilotName, month })
+    setHistoryPage(9999)
+    setHighlightedKey(null)
+    setActiveTab('history')
+  }, [])
+
+  // Scroll to highlighted mission after history tab renders
+  useEffect(() => {
+    if (!highlightedKey || activeTab !== 'history') return
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`mission-${highlightedKey}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    const clearTimer = setTimeout(() => setHighlightedKey(null), 3500)
+    return () => { clearTimeout(timer); clearTimeout(clearTimer) }
+  }, [highlightedKey, activeTab])
+
   // Data loading is gated — only starts after DB confirms permission
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
@@ -1219,32 +1245,6 @@ export default function AdminDashboard() {
     }
     fetchDB()
   }
-
-  // ── History navigation ────────────────────────────────────────────────────
-  const navigateToMission = useCallback((missionKey: string) => {
-    setHistoryPilotFilter(null)
-    setHistoryPage(9999)
-    setActiveTab('history')
-    setHighlightedKey(missionKey)
-  }, [])
-
-  const navigateToPilotHistory = useCallback((pilotName: string, month: string) => {
-    setHistoryPilotFilter({ pilotName, month })
-    setHistoryPage(9999)
-    setHighlightedKey(null)
-    setActiveTab('history')
-  }, [])
-
-  // Scroll to highlighted mission after the history tab renders
-  useEffect(() => {
-    if (!highlightedKey || activeTab !== 'history') return
-    const timer = setTimeout(() => {
-      const el = document.getElementById(`mission-${highlightedKey}`)
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 120)
-    const clearTimer = setTimeout(() => setHighlightedKey(null), 3500)
-    return () => { clearTimeout(timer); clearTimeout(clearTimer) }
-  }, [highlightedKey, activeTab])
 
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
 
