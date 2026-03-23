@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifySession, COOKIE_NAME } from '@/lib/auth'
 
 // API routes that must be accessible without a session
-const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/logout'])
+// /api/pilots is fetched by the login page before any session exists (pilot name dropdown)
+const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/logout', '/api/pilots'])
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
