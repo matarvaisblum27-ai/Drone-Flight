@@ -755,6 +755,7 @@ export default function AdminDashboard() {
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
   const [currentUserName, setCurrentUserName] = useState<string>('')
+  const [isViewer, setIsViewer] = useState(false)
   const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
   // authChecked gates all data loading — nothing renders until DB permission is confirmed
   const [authChecked, setAuthChecked] = useState(false)
@@ -783,6 +784,7 @@ export default function AdminDashboard() {
       // If DB says not admin and not סגן → kick to regular pilot dashboard immediately
       if (!s.isAdmin && !s.isViewer) { window.location.href = '/pilot'; return }
       setCurrentUserName(s.name)
+      setIsViewer(s.isViewer ?? false)
       setAuthChecked(true)
     } catch {
       window.location.href = '/'
@@ -797,8 +799,10 @@ export default function AdminDashboard() {
     return () => window.removeEventListener('focus', onFocus)
   }, [checkPermissions])
 
-  // Only אורן וייסבלום can add/edit/delete data
+  // Full admin — only אורן וייסבלום
   const canEdit = currentUserName === ADMIN_NAME
+  // Deputy (סגן) + admin — can edit flights, drones, batteries and add flights
+  const canManageData = canEdit || isViewer
 
   const fetchDB = useCallback(async () => {
     const res = await fetch('/api/flights', { cache: 'no-store' })
@@ -1375,8 +1379,8 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-300 hidden sm:block">{currentUserName}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${canEdit ? 'bg-blue-600/20 text-blue-400 border-blue-700/40' : 'bg-purple-600/20 text-purple-400 border-purple-700/40'}`}>
-              {canEdit ? 'מפקד' : 'סגן'}
+            <span className={`text-xs px-2 py-0.5 rounded-full border ${canEdit ? 'bg-blue-600/20 text-blue-400 border-blue-700/40' : isViewer ? 'bg-purple-600/20 text-purple-400 border-purple-700/40' : 'bg-slate-600/20 text-slate-400 border-slate-700/40'}`}>
+              {canEdit ? 'מפקד' : isViewer ? 'סגן' : 'צפייה'}
             </span>
             {!canEdit && (
               <a href="/pilot"
@@ -1786,15 +1790,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* Tabs */}
         <div className="flex gap-1 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1 overflow-x-auto">
           {([
-            { key: 'overview',   label: 'סקירה',          icon: '📊', adminOnly: false },
-            { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', adminOnly: false },
-            { key: 'add',        label: 'הוספת טיסה',      icon: '➕', adminOnly: true  },
-            { key: 'history',    label: 'היסטוריה',        icon: '📜', adminOnly: false },
-            { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️', adminOnly: false },
-            { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋', adminOnly: false },
-            { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁', adminOnly: false },
-            { key: 'logs',       label: 'יומן כניסות',     icon: '🔐', adminOnly: false },
-          ] as const).filter(({ adminOnly }) => canEdit || !adminOnly).map(({ key, label, icon }) => (
+            { key: 'overview',   label: 'סקירה',          icon: '📊', minLevel: 'viewer'  },
+            { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', minLevel: 'viewer'  },
+            { key: 'add',        label: 'הוספת טיסה',      icon: '➕', minLevel: 'deputy'  },
+            { key: 'history',    label: 'היסטוריה',        icon: '📜', minLevel: 'viewer'  },
+            { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️', minLevel: 'viewer'  },
+            { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋', minLevel: 'viewer'  },
+            { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁', minLevel: 'viewer'  },
+            { key: 'logs',       label: 'יומן כניסות',     icon: '🔐', minLevel: 'admin'   },
+          ] as const).filter(({ minLevel }) =>
+            minLevel === 'viewer' || (minLevel === 'deputy' && canManageData) || (minLevel === 'admin' && canEdit)
+          ).map(({ key, label, icon }) => (
             <button key={key} onClick={() => setActiveTab(key)}
               className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
                 ${activeTab === key ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}>
@@ -2447,7 +2453,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-700/20 text-right">
-                        {['#', 'טייס', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', ...(canEdit ? ['פעולות'] : [])].map(h => (
+                        {['#', 'טייס', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', ...(canManageData ? ['פעולות'] : [])].map(h => (
                           <th key={h} className="px-4 py-2 text-xs font-medium text-slate-500">{h}</th>
                         ))}
                       </tr>
@@ -2470,7 +2476,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           </td>
                           <td className="px-4 py-3 text-slate-400 text-xs">{f.startTime}–{f.endTime}</td>
                           <td className="px-4 py-3 text-blue-400 font-medium whitespace-nowrap">{fmtHours(f.duration)}</td>
-                          {canEdit && (
+                          {canManageData && (
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1.5">
                                 <button onClick={() => setEditFlight(f)} title="עריכה"
@@ -2636,7 +2642,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* BATTERIES */}
         {activeTab === 'batteries' && (
           <div className="space-y-5">
-            {canEdit && (
+            {canManageData && (
               <div className="flex justify-end">
                 <button
                   onClick={() => setBatteryModal({ battery: null, tailNumber: '' })}
@@ -2659,14 +2665,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm" dir="rtl">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['רחפן', 'שם סוללה', 'מחזור', 'תאריך בדיקה', ...(canEdit ? ['פעולות'] : [])].map(h => (
+                      {['רחפן', 'שם סוללה', 'מחזור', 'תאריך בדיקה', ...(canManageData ? ['פעולות'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
                     {droneBatteries.length === 0 ? (
-                      <tr><td colSpan={canEdit ? 5 : 4} className="px-4 py-8 text-center text-slate-500 text-sm">אין סוללות רשומות במערכת</td></tr>
+                      <tr><td colSpan={canManageData ? 5 : 4} className="px-4 py-8 text-center text-slate-500 text-sm">אין סוללות רשומות במערכת</td></tr>
                     ) : (
                       droneBatteries.map(bat => (
                         <tr key={bat.id} className="hover:bg-slate-700/20 transition-colors">
@@ -2674,7 +2680,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           <td className="px-4 py-3 text-white font-medium">{bat.batteryName}</td>
                           <td className="px-4 py-3 text-slate-300 font-mono text-xs">{bat.chargeCycle || '—'}</td>
                           <td className="px-4 py-3 text-slate-400 text-xs">{bat.inspectionDate || '—'}</td>
-                          {canEdit && (
+                          {canManageData && (
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1.5">
                                 <button
@@ -2724,7 +2730,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-blue-400">🚁</span> ניהול רחפנים ({droneDetails.length || DRONES.length})
                 </h2>
-                {canEdit && (
+                {canManageData && (
                   <button
                     onClick={() => setEditDroneModal('new')}
                     className="flex items-center gap-1.5 text-sm text-white bg-green-700/80 hover:bg-green-600 border border-green-600/50 px-3 py-2 rounded-xl transition-all font-medium shrink-0"
@@ -2738,7 +2744,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/30 text-right">
-                      {['דגם', 'מס\' זנב', 'משקל', 'מס\' סידורי (S.N)', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', ...(canEdit ? ['פעולות'] : [])].map(h => (
+                      {['דגם', 'מס\' זנב', 'משקל', 'מס\' סידורי (S.N)', 'טיסות', 'סה"כ שעות', 'טיסה אחרונה', ...(canManageData ? ['פעולות'] : [])].map(h => (
                         <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -2771,7 +2777,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             <td className="px-4 py-3 text-slate-400 text-xs">
                               {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                             </td>
-                            {canEdit && (
+                            {canManageData && (
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {/* Edit drone */}
@@ -2797,15 +2803,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                   >
                                     🔋 {batteries.length > 0 ? `${batteries.length} סטים` : 'סוללות'}
                                   </button>
-                                  {/* Excel */}
-                                  <button
-                                    onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
-                                    disabled={dFlights.length === 0}
-                                    className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                                  >
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    XLS
-                                  </button>
+                                  {/* Excel — admin only */}
+                                  {canEdit && (
+                                    <button
+                                      onClick={() => downloadDroneExcel(dFlights, db.pilots, drone.tailNumber)}
+                                      disabled={dFlights.length === 0}
+                                      className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                      XLS
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             )}
@@ -2813,12 +2821,12 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           {/* Expandable battery rows */}
                           {isExpanded && (
                             <tr key={`${drone.tailNumber}-batteries`} className="bg-slate-900/60 border-b border-slate-700/30">
-                              <td colSpan={canEdit ? 8 : 7} className="px-6 py-4">
+                              <td colSpan={canManageData ? 8 : 7} className="px-6 py-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <h4 className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
                                     🔋 סוללות — {drone.model} ({drone.tailNumber})
                                   </h4>
-                                  {canEdit && (
+                                  {canManageData && (
                                     <button
                                       onClick={() => setBatteryModal({ battery: null, tailNumber: drone.tailNumber })}
                                       className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-700/40 px-2.5 py-1.5 rounded-lg transition-all"
@@ -2837,7 +2845,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                         <th className="pb-2 font-medium">שם סוללה</th>
                                         <th className="pb-2 font-medium">מחזור</th>
                                         <th className="pb-2 font-medium">תאריך בדיקה</th>
-                                        {canEdit && <th className="pb-2 font-medium"></th>}
+                                        {canManageData && <th className="pb-2 font-medium"></th>}
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-700/30">
@@ -2846,7 +2854,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                           <td className="py-2 font-medium text-white">{bat.batteryName}</td>
                                           <td className="py-2 text-slate-300 font-mono">{bat.chargeCycle || '—'}</td>
                                           <td className="py-2 text-slate-400">{bat.inspectionDate || '—'}</td>
-                                          {canEdit && (
+                                          {canManageData && (
                                             <td className="py-2">
                                               <div className="flex gap-1.5 justify-end">
                                                 <button
