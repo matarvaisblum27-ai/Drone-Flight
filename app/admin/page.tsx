@@ -760,6 +760,9 @@ export default function AdminDashboard() {
   const [authChecked, setAuthChecked] = useState(false)
   // History tab pagination
   const [historyPage, setHistoryPage] = useState(25)
+  // History navigation — highlight a specific mission group and filter by pilot
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null)
+  const [historyPilotFilter, setHistoryPilotFilter] = useState<{ pilotName: string; month: string } | null>(null)
   // Mission merge state
   const [mergingGroupKey, setMergingGroupKey] = useState<string | null>(null)
   const [mergeTargetKey, setMergeTargetKey] = useState('')
@@ -898,7 +901,7 @@ export default function AdminDashboard() {
   Object.values(monthlyMissionsList).forEach(ms => ms.sort((a, b) => a.date.localeCompare(b.date)))
 
   // Combined gas drops YTD (flights with gas_dropped=true + gas_drops table, deduplicated)
-  interface CombinedGasDrop { date: string; pilotName: string; tailNumber: string; model: string; missionName: string; eventNumber: string }
+  interface CombinedGasDrop { date: string; pilotName: string; tailNumber: string; model: string; missionName: string; eventNumber: string; missionKey?: string }
   const droneModelMap = new Map(DRONES.map(d => [d.tailNumber, d.model]))
   const allGasDropsYTD: CombinedGasDrop[] = []
   const gasDropDedupKeys = new Set<string>()
@@ -906,7 +909,7 @@ export default function AdminDashboard() {
     const key = `${f.date}|${f.tailNumber}|${f.pilotName}`
     if (!gasDropDedupKeys.has(key)) {
       gasDropDedupKeys.add(key)
-      allGasDropsYTD.push({ date: f.date, pilotName: f.pilotName, tailNumber: f.tailNumber, model: droneModelMap.get(f.tailNumber) ?? f.tailNumber, missionName: f.missionName, eventNumber: f.eventNumber ?? '' })
+      allGasDropsYTD.push({ date: f.date, pilotName: f.pilotName, tailNumber: f.tailNumber, model: droneModelMap.get(f.tailNumber) ?? f.tailNumber, missionName: f.missionName, eventNumber: f.eventNumber ?? '', missionKey: missionKeyFn(f) })
     }
   })
   gasDrops.filter(g => g.date.startsWith(thisYear)).forEach(g => {
@@ -1217,6 +1220,32 @@ export default function AdminDashboard() {
     fetchDB()
   }
 
+  // ── History navigation ────────────────────────────────────────────────────
+  const navigateToMission = useCallback((missionKey: string) => {
+    setHistoryPilotFilter(null)
+    setHistoryPage(9999)
+    setActiveTab('history')
+    setHighlightedKey(missionKey)
+  }, [])
+
+  const navigateToPilotHistory = useCallback((pilotName: string, month: string) => {
+    setHistoryPilotFilter({ pilotName, month })
+    setHistoryPage(9999)
+    setHighlightedKey(null)
+    setActiveTab('history')
+  }, [])
+
+  // Scroll to highlighted mission after the history tab renders
+  useEffect(() => {
+    if (!highlightedKey || activeTab !== 'history') return
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`mission-${highlightedKey}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    const clearTimer = setTimeout(() => setHighlightedKey(null), 3500)
+    return () => { clearTimeout(timer); clearTimeout(clearTimer) }
+  }, [highlightedKey, activeTab])
+
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
 
   // Mission groups for history tab
@@ -1253,6 +1282,14 @@ export default function AdminDashboard() {
       return d !== 0 ? d : b.missionNum - a.missionNum
     })
   })()
+  // History visible groups — filtered by pilot/month when navigating from hours drill-down
+  const visibleMissionGroups = historyPilotFilter
+    ? adminMissionGroups.filter(g =>
+        g.date.startsWith(historyPilotFilter.month) &&
+        g.flights.some(f => f.pilotName === historyPilotFilter.pilotName)
+      )
+    : adminMissionGroups
+
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
@@ -1449,10 +1486,11 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         {isMonthOpen && (
                           <div className="mr-4 mb-1 mt-0.5 space-y-0.5 border-r-2 border-slate-600/50 pr-3">
                             {pilotRows.map(([name, pilotMins]) => (
-                              <div key={name} className="flex items-center gap-2 py-0.5">
-                                <span className="text-xs text-slate-400 flex-1 text-right">{name}</span>
+                              <button key={name} onClick={() => navigateToPilotHistory(name, monthKey)}
+                                className="w-full flex items-center gap-2 py-1 px-1.5 rounded-lg hover:bg-slate-700/40 transition-colors group text-right">
+                                <span className="text-xs text-blue-300 group-hover:text-blue-200 flex-1 text-right group-hover:underline">{name}</span>
                                 <span className="text-xs font-medium text-slate-300 shrink-0">{fmtHours(pilotMins)}</span>
-                              </div>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -1522,11 +1560,12 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         {isMonthOpen && (
                           <div className="mr-4 mb-1 mt-0.5 space-y-1 border-r-2 border-slate-600/50 pr-3">
                             {missions.map(ms => (
-                              <div key={ms.missionKey} className="flex items-start gap-2 py-0.5">
+                              <button key={ms.missionKey} onClick={() => navigateToMission(ms.missionKey)}
+                                className="w-full flex items-start gap-2 py-1 px-1.5 rounded-lg hover:bg-slate-700/40 transition-colors group text-right">
                                 <span className="text-xs text-slate-500 shrink-0 mt-px">{fmtShortDate(ms.date)}</span>
-                                <span className="text-xs text-slate-300 flex-1 text-right leading-snug">{ms.missionName}</span>
+                                <span className="text-xs text-blue-300 group-hover:text-blue-200 flex-1 text-right leading-snug group-hover:underline">{ms.missionName}</span>
                                 <span className="text-xs text-slate-400 shrink-0 text-left">{ms.pilots.join(', ')}</span>
-                              </div>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -1599,15 +1638,22 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         <div className="mr-4 mb-1 mt-0.5 space-y-2 border-r-2 border-amber-700/40 pr-3">
                           {drops.map((drop, i) => {
                             const isOp = !!drop.eventNumber
+                            const canNav = !!drop.missionKey
                             return (
-                              <div key={i} className="py-1 space-y-0.5">
+                              <div
+                                key={i}
+                                onClick={canNav ? () => navigateToMission(drop.missionKey!) : undefined}
+                                className={`py-1.5 px-2 space-y-0.5 rounded-lg transition-colors ${canNav ? 'cursor-pointer hover:bg-amber-900/20 group' : ''}`}
+                                title={canNav ? 'לחץ לעבור להיסטוריה' : undefined}
+                              >
                                 {/* Line 1: date · pilot · drone */}
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                   <span className="text-xs font-medium text-slate-300 shrink-0">{fmtShortDate(drop.date)}</span>
                                   <span className="text-slate-600 shrink-0">·</span>
-                                  <span className="text-xs text-slate-300 shrink-0">{drop.pilotName}</span>
+                                  <span className={`text-xs shrink-0 ${canNav ? 'text-amber-300 group-hover:text-amber-200 group-hover:underline' : 'text-slate-300'}`}>{drop.pilotName}</span>
                                   <span className="text-slate-600 shrink-0">·</span>
                                   <span className="text-xs text-slate-400 shrink-0">{drop.model} <span className="font-mono text-slate-500">{drop.tailNumber}</span></span>
+                                  {canNav && <span className="text-[10px] text-amber-600 shrink-0">← לחץ לעבור</span>}
                                 </div>
                                 {/* Line 2: type · mission · event number */}
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -1703,9 +1749,10 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                 </div>
                                 <div className="space-y-2">
                                   {missions.sort((a, b) => a.date.localeCompare(b.date)).map(ms => (
-                                    <div key={ms.missionKey} className="bg-slate-700/40 rounded-lg px-3 py-2">
+                                    <button key={ms.missionKey} onClick={() => navigateToMission(ms.missionKey)}
+                                      className="w-full text-right bg-slate-700/40 hover:bg-slate-700/70 rounded-lg px-3 py-2 transition-colors group">
                                       <div className="flex items-start justify-between gap-2">
-                                        <p className="text-xs font-semibold text-indigo-300 leading-snug">{ms.missionName || <span className="text-slate-500 italic">ללא שם</span>}</p>
+                                        <p className="text-xs font-semibold text-indigo-300 group-hover:text-indigo-200 group-hover:underline leading-snug">{ms.missionName || <span className="text-slate-500 italic">ללא שם</span>}</p>
                                         <span className="text-[10px] text-slate-500 shrink-0">{new Date(ms.date).toLocaleDateString('he-IL')}</span>
                                       </div>
                                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
@@ -1716,7 +1763,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                           <span className="text-[10px] text-slate-400">🚁 {ms.drones.map(droneLabel).join(', ')}</span>
                                         )}
                                       </div>
-                                    </div>
+                                    </button>
                                   ))}
                                 </div>
                               </div>
@@ -2310,7 +2357,26 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </h2>
               <span className="text-xs text-slate-400">{adminMissionGroups.length} משימות · {db.flights.length} טיסות</span>
             </div>
-            {adminMissionGroups.slice(0, historyPage).map(group => {
+            {historyPilotFilter && (
+              <div className="flex items-center gap-3 bg-blue-900/30 border border-blue-700/40 rounded-xl px-4 py-2.5" dir="rtl">
+                <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+                </svg>
+                <span className="text-xs text-blue-300 flex-1">
+                  מסנן: <span className="font-semibold text-white">{historyPilotFilter.pilotName}</span>
+                  {' · '}
+                  <span className="font-semibold text-white">{HEBREW_MONTH_NAMES[parseInt(historyPilotFilter.month.slice(5, 7), 10) - 1]}</span>
+                  {' · '}
+                  {visibleMissionGroups.length} משימות
+                </span>
+                <button
+                  onClick={() => setHistoryPilotFilter(null)}
+                  className="text-xs text-blue-400 hover:text-white bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700/40 px-2.5 py-1 rounded-lg transition-all">
+                  נקה סינון
+                </button>
+              </div>
+            )}
+            {visibleMissionGroups.slice(0, historyPage).map(group => {
               // Other missions on the same date (for merge dropdown)
               const sameDayGroups = adminMissionGroups.filter(g => g.date === group.date && g.key !== group.key)
               const isMerging = mergingGroupKey === group.key
@@ -2318,8 +2384,13 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               const monthBorder = ['border-l-blue-500', 'border-l-green-500', 'border-l-yellow-500'][monthIdx % 3]
               const monthBadge  = ['bg-blue-900/40 text-blue-300 border-blue-700/40', 'bg-green-900/40 text-green-300 border-green-700/40', 'bg-yellow-900/40 text-yellow-300 border-yellow-700/40'][monthIdx % 3]
               const monthName   = HEBREW_MONTH_NAMES[monthIdx]
+              const isHighlighted = highlightedKey === group.key
               return (
-              <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${monthBorder} rounded-xl overflow-hidden`}>
+              <div
+                key={group.key}
+                id={`mission-${group.key}`}
+                className={`border border-slate-700/50 border-l-4 ${monthBorder} rounded-xl overflow-hidden ${isHighlighted ? 'mission-highlight' : 'bg-slate-800/70'}`}
+              >
                 {/* Mission header */}
                 <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3 flex-wrap">
                   <span className={`text-xs px-1.5 py-0.5 rounded border font-medium shrink-0 ${monthBadge}`}>{monthName}</span>
@@ -2427,11 +2498,11 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </div>
               )
             })}
-            {adminMissionGroups.length > historyPage && (
+            {visibleMissionGroups.length > historyPage && (
               <button
                 onClick={() => setHistoryPage(p => p + 25)}
                 className="w-full py-3 text-sm font-medium text-slate-300 bg-slate-800/70 border border-slate-700/50 hover:bg-slate-700/70 rounded-xl transition-all">
-                טען עוד ({adminMissionGroups.length - historyPage} נותרו)
+                טען עוד ({visibleMissionGroups.length - historyPage} נותרו)
               </button>
             )}
           </div>
