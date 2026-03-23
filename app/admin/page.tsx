@@ -814,8 +814,8 @@ export default function AdminDashboard() {
 
   const fetchDroneData = useCallback(async () => {
     const [dronesRes, batteriesRes] = await Promise.all([
-      fetch('/api/drones'),
-      fetch('/api/drone-batteries'),
+      fetch('/api/drones', { cache: 'no-store' }),
+      fetch('/api/drone-batteries', { cache: 'no-store' }),
     ])
     if (dronesRes.ok) setDroneDetails(await dronesRes.json())
     if (batteriesRes.ok) setDroneBatteries(await batteriesRes.json())
