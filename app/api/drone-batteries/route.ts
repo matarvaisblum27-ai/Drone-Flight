@@ -33,14 +33,16 @@ export async function GET(req: NextRequest) {
     .from('drone_batteries').select('*').order('drone_tail_number').order('battery_name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  const CACHE = { headers: { 'Cache-Control': 'private, max-age=180, stale-while-revalidate=60' } }
+
   if (data.length === 0) {
     const { data: seeded, error: seedErr } = await supabase
       .from('drone_batteries').insert(INITIAL_BATTERIES).select()
     if (seedErr) return NextResponse.json({ error: seedErr.message }, { status: 500 })
-    return NextResponse.json(seeded.map(rowToBattery))
+    return NextResponse.json(seeded.map(rowToBattery), CACHE)
   }
 
-  return NextResponse.json(data.map(rowToBattery))
+  return NextResponse.json(data.map(rowToBattery), CACHE)
 }
 
 export async function POST(req: NextRequest) {

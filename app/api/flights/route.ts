@@ -5,6 +5,9 @@ import { requireSession } from '@/lib/requireSession'
 
 export const dynamic = 'force-dynamic'
 
+// Cache migration check — once migrated it never reverts; avoids extra DB roundtrip per request
+let _migrated: boolean | null = null
+
 function parseArray(val: unknown): string[] {
   if (!val) return []
   const s = String(val).trim()
@@ -38,27 +41,26 @@ function rowToFlight(row: any): Flight {
 }
 
 async function hasMigration(): Promise<boolean> {
+  if (_migrated !== null) return _migrated
   const { error } = await supabase.from('flights').select('observer').limit(1)
-  return !error
+  _migrated = !error
+  return _migrated
 }
 
 export async function GET(req: NextRequest) {
   const { error: authError } = await requireSession(req)
   if (authError) return authError
 
-  const [pilotsRes, flightsRes, batteriesRes, migrated] = await Promise.all([
-    supabase.from('pilots').select('*').order('name'),
-    supabase.from('flights').select('*').order('date').order('start_time'),
-    supabase.from('batteries').select('*'),
+  const [pilotsRes, flightsRes, migrated] = await Promise.all([
+    supabase.from('pilots').select('id,name,license,is_admin').order('name'),
+    supabase.from('flights')
+      .select('id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion')
+      .order('date').order('start_time'),
     hasMigration(),
   ])
 
-  if (pilotsRes.error)    return NextResponse.json({ error: pilotsRes.error.message },    { status: 500 })
-  if (flightsRes.error)   return NextResponse.json({ error: flightsRes.error.message },   { status: 500 })
-  if (batteriesRes.error) return NextResponse.json({ error: batteriesRes.error.message }, { status: 500 })
-
-  const batteries: Record<string, number> = {}
-  for (const row of batteriesRes.data) batteries[row.label] = row.percentage
+  if (pilotsRes.error)  return NextResponse.json({ error: pilotsRes.error.message },  { status: 500 })
+  if (flightsRes.error) return NextResponse.json({ error: flightsRes.error.message }, { status: 500 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapPilot = (row: any) => ({ id: row.id, name: row.name, license: row.license, isAdmin: row.is_admin ?? false })
@@ -66,7 +68,7 @@ export async function GET(req: NextRequest) {
   const db: FlightDB = {
     pilots:          pilotsRes.data.map(mapPilot),
     flights:         flightsRes.data.map(rowToFlight),
-    batteries,
+    batteries:       {},
     migrationNeeded: !migrated,
   }
   return NextResponse.json(db)

@@ -758,6 +758,8 @@ export default function AdminDashboard() {
   const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
   // authChecked gates all data loading — nothing renders until DB permission is confirmed
   const [authChecked, setAuthChecked] = useState(false)
+  // History tab pagination
+  const [historyPage, setHistoryPage] = useState(25)
   // Mission merge state
   const [mergingGroupKey, setMergingGroupKey] = useState<string | null>(null)
   const [mergeTargetKey, setMergeTargetKey] = useState('')
@@ -802,8 +804,8 @@ export default function AdminDashboard() {
 
   const fetchDroneData = useCallback(async () => {
     const [dronesRes, batteriesRes] = await Promise.all([
-      fetch('/api/drones', { cache: 'no-store' }),
-      fetch('/api/drone-batteries', { cache: 'no-store' }),
+      fetch('/api/drones'),
+      fetch('/api/drone-batteries'),
     ])
     if (dronesRes.ok) setDroneDetails(await dronesRes.json())
     if (batteriesRes.ok) setDroneBatteries(await batteriesRes.json())
@@ -819,11 +821,17 @@ export default function AdminDashboard() {
     if (res.ok) setLoginLogs(await res.json())
   }, [])
 
+  // Reset history pagination when leaving the history tab
+  useEffect(() => { if (activeTab !== 'history') setHistoryPage(25) }, [activeTab])
+
   // Data loading is gated — only starts after DB confirms permission
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
   useEffect(() => { if (authChecked) fetchGasDrops() }, [authChecked, fetchGasDrops])
-  useEffect(() => { if (authChecked) fetchLoginLogs() }, [authChecked, fetchLoginLogs])
+  // Login logs are only needed in the logs tab — load lazily
+  useEffect(() => {
+    if (authChecked && activeTab === 'logs') fetchLoginLogs()
+  }, [authChecked, activeTab, fetchLoginLogs])
 
   if (!db) {
     return (
@@ -2302,7 +2310,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </h2>
               <span className="text-xs text-slate-400">{adminMissionGroups.length} משימות · {db.flights.length} טיסות</span>
             </div>
-            {adminMissionGroups.map(group => {
+            {adminMissionGroups.slice(0, historyPage).map(group => {
               // Other missions on the same date (for merge dropdown)
               const sameDayGroups = adminMissionGroups.filter(g => g.date === group.date && g.key !== group.key)
               const isMerging = mergingGroupKey === group.key
@@ -2419,6 +2427,13 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </div>
               )
             })}
+            {adminMissionGroups.length > historyPage && (
+              <button
+                onClick={() => setHistoryPage(p => p + 25)}
+                className="w-full py-3 text-sm font-medium text-slate-300 bg-slate-800/70 border border-slate-700/50 hover:bg-slate-700/70 rounded-xl transition-all">
+                טען עוד ({adminMissionGroups.length - historyPage} נותרו)
+              </button>
+            )}
           </div>
         )}
 

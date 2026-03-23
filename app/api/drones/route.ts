@@ -37,13 +37,15 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase.from('drones').select('*').order('model_name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  const CACHE = { headers: { 'Cache-Control': 'private, max-age=180, stale-while-revalidate=60' } }
+
   if (data.length === 0) {
     const { data: seeded, error: seedErr } = await supabase.from('drones').insert(INITIAL_DRONES).select()
     if (seedErr) return NextResponse.json({ error: seedErr.message }, { status: 500 })
-    return NextResponse.json(seeded.map(rowToDrone))
+    return NextResponse.json(seeded.map(rowToDrone), CACHE)
   }
 
-  return NextResponse.json(data.map(rowToDrone))
+  return NextResponse.json(data.map(rowToDrone), CACHE)
 }
 
 export async function POST(req: NextRequest) {

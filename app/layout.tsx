@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Image from 'next/image'
 import './globals.css'
 import Footer from '@/components/Footer'
 
@@ -17,10 +18,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="fixed inset-0 flex items-center justify-center pointer-events-none select-none"
           style={{ zIndex: 0 }}
         >
-          <img
+          <Image
             src="/logo.png"
             alt=""
             aria-hidden="true"
+            width={620}
+            height={402}
+            priority
             style={{ width: '55vw', maxWidth: '42rem', opacity: 0.06 }}
           />
         </div>
