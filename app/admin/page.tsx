@@ -795,28 +795,26 @@ export default function AdminDashboard() {
   const [merging, setMerging] = useState(false)
   const [confirmMerge, setConfirmMerge] = useState<{ sourceKey: string; targetKey: string } | null>(null)
 
+  // ── Auth gate ───────────────────────────────────────────────────────────────
+  // Calls /api/verify-session on every mount and re-focus.
+  // Nothing is rendered until this confirms a valid admin/deputy session.
   const checkPermissions = useCallback(async () => {
     try {
-      // /api/auth/me reads is_admin FRESH from Supabase AND refreshes the JWT so
-      // אורן's session never expires while on the page (keeps PUT /api/pilots working).
-      // cache:'no-store' + server Cache-Control:no-store prevents any browser caching.
-      const r = await fetch('/api/auth/me', {
+      const r = await fetch('/api/verify-session', {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       })
-      if (!r.ok) { window.location.href = '/'; return }
+      if (!r.ok) { window.location.replace('/'); return }
       const s = await r.json()
-      // If DB says not admin and not סגן → kick to regular pilot dashboard immediately
-      if (!s.isAdmin && !s.isViewer) { window.location.href = '/pilot'; return }
+      if (!s.isAdmin && !s.isViewer) { window.location.replace('/pilot'); return }
       setCurrentUserName(s.name)
       setIsViewer(s.isViewer ?? false)
       setAuthChecked(true)
     } catch {
-      window.location.href = '/'
+      window.location.replace('/')
     }
   }, [])
 
-  // Run permission check on every page load and whenever the tab regains focus
   useEffect(() => {
     checkPermissions()
     const onFocus = () => checkPermissions()
@@ -902,6 +900,19 @@ export default function AdminDashboard() {
     const iv = setInterval(() => fetchLoginLogs(0, false), 30_000)
     return () => clearInterval(iv)
   }, [authChecked, activeTab, fetchLoginLogs])
+
+  // ── Hard auth gate — render NOTHING until session is confirmed ─────────────
+  // This is the first conditional return in the component. authChecked is false
+  // until /api/verify-session returns 200. If there is no valid session the
+  // checkPermissions callback already called window.location.replace('/'), so
+  // we just keep showing the spinner until the navigation completes.
+  if (!authChecked) {
+    return (
+      <div className="fixed inset-0 bg-slate-900 flex items-center justify-center" style={{ zIndex: 9999 }}>
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   if (!db) {
     return (

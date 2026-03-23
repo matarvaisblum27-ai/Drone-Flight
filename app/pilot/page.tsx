@@ -236,23 +236,26 @@ export default function PilotDashboard() {
   const [formSuccess, setFormSuccess] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [showChangePwd, setShowChangePwd] = useState(false)
+  // authChecked: false until /api/verify-session confirms a valid session
+  const [authChecked, setAuthChecked] = useState(false)
 
   useEffect(() => {
-    // /api/auth/me reads is_admin FRESH from DB AND refreshes the JWT
-    fetch('/api/auth/me', {
+    // ── Auth gate: call /api/verify-session before rendering anything ────────
+    fetch('/api/verify-session', {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     }).then(async r => {
-      if (!r.ok) { window.location.href = '/'; return }
+      if (!r.ok) { window.location.replace('/'); return }
       const s = await r.json()
-      // Only the true admin (אורן) is forced to the admin dashboard
-      if (s.isAdmin) { window.location.href = '/admin'; return }
+      // True admin must use /admin
+      if (s.isAdmin) { window.location.replace('/admin'); return }
       setUserName(s.name)
-    }).catch(() => { window.location.href = '/' })
+      setAuthChecked(true)
+    }).catch(() => { window.location.replace('/') })
   }, [])
 
   const fetchDB = useCallback(async () => {
-    const res = await fetch('/api/flights')
+    const res = await fetch('/api/flights', { cache: 'no-store' })
     const data = await res.json()
     setDb(data)
   }, [])
@@ -262,8 +265,18 @@ export default function PilotDashboard() {
     if (res.ok) setDroneBatteries(await res.json())
   }, [])
 
-  useEffect(() => { fetchDB() }, [fetchDB])
-  useEffect(() => { fetchBatteries() }, [fetchBatteries])
+  // Only fetch data after auth is confirmed
+  useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
+  useEffect(() => { if (authChecked) fetchBatteries() }, [authChecked, fetchBatteries])
+
+  // ── Hard auth gate — render NOTHING until session is confirmed ───────────
+  if (!authChecked) {
+    return (
+      <div className="fixed inset-0 bg-slate-900 flex items-center justify-center" style={{ zIndex: 9999 }}>
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   if (!db || !userName) {
     return (
