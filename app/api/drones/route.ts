@@ -80,8 +80,14 @@ export async function DELETE(req: NextRequest) {
   if (authError) return authError
   const tailNumber = req.nextUrl.searchParams.get('tailNumber')
   if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
-  const { error } = await supabase.from('drones').delete().eq('tail_number', tailNumber)
+
+  const { error, count } = await supabase
+    .from('drones')
+    .delete({ count: 'exact' })
+    .eq('tail_number', tailNumber)
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (count === 0) return NextResponse.json({ error: 'drone_not_found' }, { status: 404 })
   return NextResponse.json({ ok: true })
 }
 
