@@ -218,7 +218,40 @@ function ConfirmDialog({ message, onConfirm, onCancel }: {
           </button>
           <button onClick={onConfirm}
             className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-500 rounded-lg transition-all font-medium">
-            מחק
+            כן, מחק
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Confirm save dialog ───────────────────────────────────────────────────────
+function ConfirmSaveDialog({ onConfirm, onCancel }: {
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-blue-900/30 border border-blue-700/40 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-white">אישור שמירה</h3>
+            <p className="text-xs text-slate-400 mt-0.5">האם אתה בטוח שברצונך לשמור את השינויים?</p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="px-4 py-2 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-lg transition-all">
+            ביטול
+          </button>
+          <button onClick={onConfirm} className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-all font-medium">
+            כן, שמור
           </button>
         </div>
       </div>
@@ -255,6 +288,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
     battalions:  flight.battalion.length > 0 ? [...flight.battalion] : [''],
   })
   const [error, setError] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
@@ -270,10 +304,12 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
       const dur = calcDuration(form.startTime, form.endTime)
       if (dur <= 0) { setError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
     }
-    onSave(form)
+    setShowConfirm(true)
   }
 
   return (
+    <>
+    {showConfirm && <ConfirmSaveDialog onConfirm={() => onSave(form)} onCancel={() => setShowConfirm(false)} />}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-700/60 rounded-2xl p-6 w-full max-w-2xl shadow-2xl my-4">
@@ -438,6 +474,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -454,6 +491,7 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
   const [password, setPassword] = useState('')
   const [isAdmin, setIsAdmin] = useState(pilot?.isAdmin ?? false)
   const [error, setError] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
   const isAdd = pilot === null
   const isFixedAdmin = pilot?.name === ADMIN_FIXED_NAME
 
@@ -463,10 +501,13 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
   const handleSave = () => {
     if (!name.trim() || !license.trim()) { setError('יש למלא שם ומספר רישיון'); return }
     if (isAdd && !password.trim()) { setError('יש להגדיר סיסמה לטייס חדש'); return }
+    if (!isAdd) { setShowConfirm(true); return }
     onSave(name.trim(), license.trim(), password.trim(), isAdmin)
   }
 
   return (
+    <>
+    {showConfirm && <ConfirmSaveDialog onConfirm={() => onSave(name.trim(), license.trim(), password.trim(), isAdmin)} onCancel={() => setShowConfirm(false)} />}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-700/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
@@ -533,6 +574,7 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -551,19 +593,24 @@ function DroneEditModal({ drone, onSave, onCancel }: {
     extraRegistration: drone?.extraRegistration ?? '',
   })
   const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const [showConfirm, setShowConfirm] = useState(false)
+  const droneData = {
+    tailNumber: form.tailNumber.trim(),
+    model: form.model.trim(),
+    weightKg: form.weightKg ? Number(form.weightKg) : null,
+    serialNumber: form.serialNumber.trim(),
+    extraRegistration: form.extraRegistration.trim() || null,
+  }
   const handleSave = () => {
     if (!form.tailNumber.trim() || !form.model.trim()) {
       alert('דגם ומספר זנב הם שדות חובה'); return
     }
-    onSave({
-      tailNumber: form.tailNumber.trim(),
-      model: form.model.trim(),
-      weightKg: form.weightKg ? Number(form.weightKg) : null,
-      serialNumber: form.serialNumber.trim(),
-      extraRegistration: form.extraRegistration.trim() || null,
-    })
+    if (!isNew) { setShowConfirm(true); return }
+    onSave(droneData)
   }
   return (
+    <>
+    {showConfirm && <ConfirmSaveDialog onConfirm={() => onSave(droneData)} onCancel={() => setShowConfirm(false)} />}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-md shadow-2xl">
@@ -602,6 +649,7 @@ function DroneEditModal({ drone, onSave, onCancel }: {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -621,7 +669,10 @@ function BatteryModal({ battery, tailNumber, drones, onSave, onCancel }: {
   })
   const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
   const showDroneSelect = !tailNumber && drones && drones.length > 0
+  const [showConfirm, setShowConfirm] = useState(false)
   return (
+    <>
+    {showConfirm && <ConfirmSaveDialog onConfirm={() => { onSave({ id: battery?.id, droneTailNumber: form.droneTailNumber, batteryName: form.batteryName.trim(), chargeCycle: form.chargeCycle, inspectionDate: form.inspectionDate }) }} onCancel={() => setShowConfirm(false)} />}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-600/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
@@ -655,7 +706,8 @@ function BatteryModal({ battery, tailNumber, drones, onSave, onCancel }: {
             onClick={() => {
               if (!form.batteryName.trim()) { alert('יש להזין שם סוללה'); return }
               if (!form.droneTailNumber) { alert('יש לבחור רחפן'); return }
-              onSave({ id: battery?.id, droneTailNumber: form.droneTailNumber, batteryName: form.batteryName.trim(), chargeCycle: form.chargeCycle, inspectionDate: form.inspectionDate })
+              if (battery) { setShowConfirm(true); return }
+              onSave({ droneTailNumber: form.droneTailNumber, batteryName: form.batteryName.trim(), chargeCycle: form.chargeCycle, inspectionDate: form.inspectionDate })
             }}
             className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
             {battery ? 'שמור' : 'הוסף'}
@@ -663,6 +715,7 @@ function BatteryModal({ battery, tailNumber, drones, onSave, onCancel }: {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -709,6 +762,7 @@ export default function AdminDashboard() {
   const [mergingGroupKey, setMergingGroupKey] = useState<string | null>(null)
   const [mergeTargetKey, setMergeTargetKey] = useState('')
   const [merging, setMerging] = useState(false)
+  const [confirmMerge, setConfirmMerge] = useState<{ sourceKey: string; targetKey: string } | null>(null)
 
   const checkPermissions = useCallback(async () => {
     try {
@@ -1199,7 +1253,7 @@ export default function AdminDashboard() {
       {/* Modals */}
       {confirmId && (
         <ConfirmDialog
-          message="פעולה זו תמחק את רשומת הטיסה לצמיתות."
+          message="האם אתה בטוח שברצונך למחוק? פעולה זו אינה ניתנת לביטול."
           onConfirm={() => handleDelete(confirmId)}
           onCancel={() => setConfirmId(null)}
         />
@@ -1216,7 +1270,7 @@ export default function AdminDashboard() {
       )}
       {confirmPilotId && (
         <ConfirmDialog
-          message="מחיקת טייס תסיר אותו מהמערכת. רשומות הטיסה שלו יישארו בהיסטוריה."
+          message="האם אתה בטוח שברצונך למחוק? פעולה זו אינה ניתנת לביטול."
           onConfirm={() => handleDeletePilot(confirmPilotId)}
           onCancel={() => setConfirmPilotId(null)}
         />
@@ -1238,7 +1292,7 @@ export default function AdminDashboard() {
       )}
       {confirmDeleteDroneId && (
         <ConfirmDialog
-          message={`מחיקת רחפן ${confirmDeleteDroneId} תסיר אותו מהמערכת. היסטוריית הטיסות שלו תישמר.`}
+          message="האם אתה בטוח שברצונך למחוק? פעולה זו אינה ניתנת לביטול."
           onConfirm={() => handleDeleteDrone(confirmDeleteDroneId)}
           onCancel={() => setConfirmDeleteDroneId(null)}
         />
@@ -1248,9 +1302,15 @@ export default function AdminDashboard() {
       )}
       {confirmBatteryId && (
         <ConfirmDialog
-          message="פעולה זו תמחק את רשומת הסוללה לצמיתות."
+          message="האם אתה בטוח שברצונך למחוק? פעולה זו אינה ניתנת לביטול."
           onConfirm={() => handleDeleteBattery(confirmBatteryId)}
           onCancel={() => setConfirmBatteryId(null)}
+        />
+      )}
+      {confirmMerge && (
+        <ConfirmSaveDialog
+          onConfirm={() => { handleMergeMission(confirmMerge.sourceKey, confirmMerge.targetKey); setConfirmMerge(null) }}
+          onCancel={() => setConfirmMerge(null)}
         />
       )}
 
@@ -2288,8 +2348,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         ))}
                       </select>
                       <button
-                        onClick={() => handleMergeMission(group.key, mergeTargetKey)}
-                        disabled={merging}
+                        onClick={() => { if (mergeTargetKey) setConfirmMerge({ sourceKey: group.key, targetKey: mergeTargetKey }) }}
+                        disabled={merging || !mergeTargetKey}
                         className="text-xs text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-3 py-1 rounded-lg transition-all shrink-0 font-medium"
                       >
                         {merging ? '...' : 'בצע מיזוג'}
