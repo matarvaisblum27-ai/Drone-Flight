@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifySession, COOKIE_NAME } from '@/lib/auth'
 
+// API routes that must be accessible without a session
+const PUBLIC_API_PATHS = new Set(['/api/auth/login', '/api/auth/logout'])
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
   const token = req.cookies.get(COOKIE_NAME)?.value
   const session = token ? await verifySession(token) : null
 
+  // ── Page routes ──────────────────────────────────────────────────────────
   if (pathname.startsWith('/admin')) {
-    // Allow admin (אורן) and סגן; redirect others based on whether they're logged in
     if (!session?.isAdmin && !session?.isViewer) {
       return NextResponse.redirect(new URL(session ? '/pilot' : '/', req.url))
     }
@@ -23,9 +26,17 @@ export async function middleware(req: NextRequest) {
     }
   }
 
+  // ── API routes: require a valid session (except login / logout) ──────────
+  if (pathname.startsWith('/api/') && !PUBLIC_API_PATHS.has(pathname)) {
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
+
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/pilot/:path*'],
+  // Use (.*) so /admin and /pilot themselves (no trailing slash) are also matched
+  matcher: ['/admin(.*)', '/pilot(.*)', '/api/(.*)'],
 }

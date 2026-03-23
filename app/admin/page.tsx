@@ -757,6 +757,9 @@ export default function AdminDashboard() {
   const [currentUserName, setCurrentUserName] = useState<string>('')
   const [isViewer, setIsViewer] = useState(false)
   const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
+  const [loginLogsTotal, setLoginLogsTotal] = useState(0)
+  const [loginLogsOffset, setLoginLogsOffset] = useState(0)
+  const [loginLogsLoading, setLoginLogsLoading] = useState(false)
   // authChecked gates all data loading — nothing renders until DB permission is confirmed
   const [authChecked, setAuthChecked] = useState(false)
   // History tab pagination
@@ -823,9 +826,18 @@ export default function AdminDashboard() {
     if (res.ok) setGasDrops(await res.json())
   }, [])
 
-  const fetchLoginLogs = useCallback(async () => {
-    const res = await fetch('/api/login-logs', { cache: 'no-store' })
-    if (res.ok) setLoginLogs(await res.json())
+  const fetchLoginLogs = useCallback(async (offset = 0, append = false) => {
+    setLoginLogsLoading(true)
+    try {
+      const res = await fetch(`/api/login-logs?offset=${offset}`, { cache: 'no-store' })
+      if (!res.ok) return
+      const { logs, total } = await res.json()
+      setLoginLogsTotal(total)
+      setLoginLogs(prev => append ? [...prev, ...logs] : logs)
+      setLoginLogsOffset(offset + (logs as unknown[]).length)
+    } finally {
+      setLoginLogsLoading(false)
+    }
   }, [])
 
   // Reset history pagination when leaving the history tab
@@ -861,9 +873,12 @@ export default function AdminDashboard() {
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
   useEffect(() => { if (authChecked) fetchGasDrops() }, [authChecked, fetchGasDrops])
-  // Login logs are only needed in the logs tab — load lazily
+  // Login logs — load on tab open, then auto-refresh every 30 s
   useEffect(() => {
-    if (authChecked && activeTab === 'logs') fetchLoginLogs()
+    if (!authChecked || activeTab !== 'logs') return
+    fetchLoginLogs(0, false)
+    const iv = setInterval(() => fetchLoginLogs(0, false), 30_000)
+    return () => clearInterval(iv)
   }, [authChecked, activeTab, fetchLoginLogs])
 
   if (!db) {
@@ -2893,15 +2908,24 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {activeTab === 'logs' && (
           <div className="space-y-5">
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
-              <div className="p-5 border-b border-slate-700/50 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                  <span className="text-rose-400">🔐</span> יומן כניסות ({loginLogs.length})
-                </h2>
+              <div className="p-5 border-b border-slate-700/50 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                    <span className="text-rose-400">🔐</span> יומן כניסות
+                  </h2>
+                  {loginLogsTotal > 0 && (
+                    <span className="text-xs text-slate-500">
+                      {loginLogs.length} / {loginLogsTotal} רשומות
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-600">• רענון אוטומטי כל 30 ש׳</span>
+                </div>
                 <button
-                  onClick={fetchLoginLogs}
-                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
+                  onClick={() => fetchLoginLogs(0, false)}
+                  disabled={loginLogsLoading}
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  <svg className={`w-3.5 h-3.5 ${loginLogsLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                   רענן
                 </button>
               </div>
@@ -2916,7 +2940,9 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
                     {loginLogs.length === 0 ? (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">אין רשומות יומן</td></tr>
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">
+                        {loginLogsLoading ? 'טוען...' : 'אין רשומות יומן'}
+                      </td></tr>
                     ) : loginLogs.map(log => (
                       <tr key={log.id} className="hover:bg-slate-700/20 transition-colors">
                         <td className="px-4 py-3 text-slate-400 text-xs font-mono">
@@ -2925,9 +2951,9 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         <td className="px-4 py-3 text-slate-200 text-sm">{log.pilot_name}</td>
                         <td className="px-4 py-3">
                           {log.success ? (
-                            <span className="text-xs bg-green-900/30 text-green-400 border border-green-700/40 px-2 py-0.5 rounded-full">הצלחה</span>
+                            <span className="text-xs bg-green-900/30 text-green-400 border border-green-700/40 px-2 py-0.5 rounded-full">הצלחה ✓</span>
                           ) : (
-                            <span className="text-xs bg-red-900/30 text-red-400 border border-red-700/40 px-2 py-0.5 rounded-full">כישלון</span>
+                            <span className="text-xs bg-red-900/30 text-red-400 border border-red-700/40 px-2 py-0.5 rounded-full">כישלון ✗</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-slate-500 font-mono text-xs">{log.ip_address}</td>
@@ -2936,6 +2962,21 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </tbody>
                 </table>
               </div>
+              {/* Load More */}
+              {loginLogsOffset < loginLogsTotal && (
+                <div className="p-4 border-t border-slate-700/50 flex justify-center">
+                  <button
+                    onClick={() => fetchLoginLogs(loginLogsOffset, true)}
+                    disabled={loginLogsLoading}
+                    className="flex items-center gap-2 text-sm text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-5 py-2 rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {loginLogsLoading ? (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    ) : null}
+                    טען עוד ({loginLogsTotal - loginLogsOffset} נותרו)
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
