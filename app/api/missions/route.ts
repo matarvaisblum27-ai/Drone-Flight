@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
 import { supabase } from '@/lib/supabase'
 import { Mission } from '@/lib/types'
 import { requireSession } from '@/lib/requireSession'
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   const toArr = (v: unknown) => Array.isArray(v) ? v : (v ? [String(v)] : [])
   const record = {
-    id:             `ms${Date.now()}`,
+    id:             randomUUID(),
     date:           body.date,
     name:           body.name,
     battalion:      JSON.stringify(toArr(body.battalion)),
