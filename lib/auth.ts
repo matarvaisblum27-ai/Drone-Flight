@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
-const SESSION_DURATION = '30m'
+const SESSION_DURATION = '8h'
 const COOKIE_NAME = 'session'
 
 function getSecret(): Uint8Array {

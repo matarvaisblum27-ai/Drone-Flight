@@ -294,6 +294,12 @@ export default function PilotDashboard() {
   const totalMinutes = myFlights.reduce((a, f) => a + f.duration, 0)
   const lastFlight = myFlights[0] ?? null
 
+  // Redirect to login on session expiry
+  const handleAuthError = (status: number) => {
+    if (status === 401) { window.location.replace('/'); return true }
+    return false
+  }
+
   // ── Step 1: find or create mission ────────────────────────────────────────
   const handleMissionContinue = async () => {
     setMissionError('')
@@ -324,7 +330,7 @@ export default function PilotDashboard() {
             battalion: repFlight?.battalion ?? [], observer: repFlight?.observer ?? [],
           }),
         })
-        if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+        if (!res.ok) { if (handleAuthError(res.status)) return; setMissionError('שגיאה ביצירת משימה'); return }
         const mission: Mission = await res.json()
         setSelectedMission(mission)
         setAddStep('flight')
@@ -347,7 +353,7 @@ export default function PilotDashboard() {
 
       // 1) Check missions table (new-style)
       const res = await fetch(`/api/missions?date=${missionForm.date}`)
-      if (!res.ok) { setMissionError('שגיאה בטעינת משימות'); return }
+      if (!res.ok) { if (handleAuthError(res.status)) return; setMissionError('שגיאה בטעינת משימות'); return }
       const dayMissions: Mission[] = await res.json()
 
       // 2) Build virtual missions from legacy flights not yet in missions table
@@ -370,7 +376,7 @@ export default function PilotDashboard() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ date: match.date, name: match.name, battalion: match.battalion, observer: match.observer }),
           })
-          if (!createRes.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+          if (!createRes.ok) { if (handleAuthError(createRes.status)) return; setMissionError('שגיאה ביצירת משימה'); return }
           setSimilarMission(await createRes.json())
         } else {
           setSimilarMission(match)
@@ -388,7 +394,7 @@ export default function PilotDashboard() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalions.filter(Boolean), observer: missionForm.observers.filter(Boolean) }),
     })
-    if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
+    if (!res.ok) { if (handleAuthError(res.status)) return; setMissionError('שגיאה ביצירת משימה'); return }
     const mission: Mission = await res.json()
     setSelectedMission(mission)
     setSimilarMission(null)
@@ -427,6 +433,7 @@ export default function PilotDashboard() {
       }),
     })
     if (!res.ok) {
+      if (handleAuthError(res.status)) return
       const err = await res.json().catch(() => ({}))
       setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/requireSession'
 import { supabase } from '@/lib/supabase'
+import { signSession, COOKIE_NAME } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,5 +25,16 @@ export async function GET(req: NextRequest) {
 
   const res = NextResponse.json({ valid: true, isAdmin, isViewer, name: pilot.name })
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+
+  // Refresh the session cookie so active users don't get logged out mid-session
+  const refreshedToken = await signSession({ pilotId: session.pilotId, name: pilot.name, isAdmin, isViewer })
+  res.cookies.set(COOKIE_NAME, refreshedToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 8 * 60 * 60,
+    path: '/',
+  })
+
   return res
 }
