@@ -136,6 +136,171 @@ function calcDuration(start: string, end: string): number {
   return mins
 }
 
+// ── Pilot flight edit modal ──────────────────────────────────────────────────
+// Pilots can edit the operational fields of their own flight after saving:
+// drone, battery, start/end times, gas-drop info (for gas-drop drones), and
+// whether the flight was entered in the police logbook. Mission-level fields
+// (date, mission name, observer, battalion) are NOT editable here — those are
+// shared across all flights in the mission and should be changed by the admin.
+function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
+  flight: Flight
+  batteries: DroneBattery[]
+  onSave: (updated: {
+    tailNumber: string; battery: string; startTime: string; endTime: string
+    gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
+  }) => Promise<void>
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState({
+    tailNumber: flight.tailNumber || '4x-pzk',
+    battery: flight.battery || '',
+    startTime: flight.startTime || '',
+    endTime: flight.endTime || '',
+    gasDropped: flight.gasDropped ?? false,
+    eventNumber: flight.eventNumber ?? '',
+    policeLogbookEntered: flight.policeLogbookEntered ?? false,
+  })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+  const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
+
+  const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
+  const availableBatteries = batteries.filter(b => b.droneTailNumber === form.tailNumber)
+  const noBatteries = availableBatteries.length === 0
+
+  const handleSave = async () => {
+    setError('')
+    if (form.startTime && form.endTime) {
+      const dur = calcDuration(form.startTime, form.endTime)
+      if (dur <= 0) { setError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
+    }
+    setSaving(true)
+    try {
+      await onSave(form)
+    } catch {
+      setError('שגיאה בשמירה, נסה שוב')
+      setSaving(false)
+    }
+  }
+
+  const isGasDrone = form.tailNumber === '4x-ujs' || form.tailNumber === '4x-xpg'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-slate-800 border border-slate-700/60 rounded-2xl p-6 w-full max-w-lg shadow-2xl my-4">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <span className="text-blue-400">✏️</span> עריכת טיסה
+          </h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700 transition-all">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Mission banner — read-only */}
+        <div className="bg-indigo-900/30 border border-indigo-700/40 rounded-xl px-4 py-3 mb-5">
+          <p className="text-xs text-indigo-300/80">משימה</p>
+          <p className="text-sm font-semibold text-white truncate">{flight.missionName || 'ללא שם'}</p>
+          <p className="text-xs text-indigo-300/80 mt-0.5">{new Date(flight.date).toLocaleDateString('he-IL')}</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>מספר זנב</label>
+            <select value={form.tailNumber}
+              onChange={e => setForm(f => {
+                const newTail = e.target.value
+                const batsForNew = batteries.filter(b => b.droneTailNumber === newTail)
+                const keepBattery = batsForNew.some(b => b.batteryName === f.battery)
+                return { ...f, tailNumber: newTail, battery: keepBattery ? f.battery : '' }
+              })}
+              className={inputCls}>
+              {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>סוללה</label>
+            {noBatteries ? (
+              <select disabled className={`${inputCls} opacity-50 cursor-not-allowed`}>
+                <option>אין סוללות רשומות לרחפן זה</option>
+              </select>
+            ) : (
+              <select value={form.battery} onChange={e => setForm(f => ({ ...f, battery: e.target.value }))} className={inputCls}>
+                <option value="">— בחר סוללה —</option>
+                {availableBatteries.map(b => <option key={b.id} value={b.batteryName}>{b.batteryName}</option>)}
+              </select>
+            )}
+          </div>
+          <div>
+            <label className={labelCls}>שעת המראה</label>
+            <input type="time" value={form.startTime}
+              onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))}
+              className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>שעת נחיתה</label>
+            <input type="time" value={form.endTime}
+              onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
+              className={inputCls} />
+          </div>
+          {isGasDrone && (
+            <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
+              <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={form.gasDropped}
+                  onChange={e => setForm(f => ({ ...f, gasDropped: e.target.checked, eventNumber: e.target.checked ? f.eventNumber : '' }))}
+                  className="w-4 h-4 accent-amber-500" />
+                <span className="text-sm text-amber-200">בוצעה הטלת גז?</span>
+              </label>
+              {form.gasDropped && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-amber-400/80 mb-1.5">מספר אירוע</label>
+                  <input type="text" value={form.eventNumber}
+                    onChange={e => setForm(f => ({ ...f, eventNumber: e.target.value }))}
+                    placeholder="מס׳ אירוע..." className={inputCls} />
+                </div>
+              )}
+            </div>
+          )}
+          <div className="sm:col-span-2 bg-cyan-900/20 border border-cyan-700/40 rounded-xl p-4">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={form.policeLogbookEntered}
+                onChange={e => setForm(f => ({ ...f, policeLogbookEntered: e.target.checked }))}
+                className="w-4 h-4 accent-cyan-500" />
+              <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
+            </label>
+          </div>
+        </div>
+
+        {durationPreview !== null && durationPreview > 0 && (
+          <div className="mt-4 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2 text-xs text-blue-300">
+            משך מחושב: <strong>{fmtHours(durationPreview)}</strong> ({durationPreview} דקות)
+          </div>
+        )}
+        {error && (
+          <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-3 py-2 text-sm text-red-400">{error}</div>
+        )}
+
+        <div className="flex gap-2 mt-6">
+          <button onClick={onCancel} disabled={saving}
+            className="flex-1 px-4 py-2.5 text-sm text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-xl transition-all disabled:opacity-60">
+            ביטול
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium disabled:opacity-60">
+            {saving ? 'שומר...' : 'שמור שינויים'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -231,10 +396,12 @@ export default function PilotDashboard() {
   const [flightForm, setFlightForm] = useState({
     tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '',
     gasDropped: false, eventNumber: '',
+    policeLogbookEntered: false,
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [editFlight, setEditFlight] = useState<Flight | null>(null)
   const [showChangePwd, setShowChangePwd] = useState(false)
   // authChecked: false until /api/verify-session confirms a valid session
   const [authChecked, setAuthChecked] = useState(false)
@@ -424,6 +591,7 @@ export default function PilotDashboard() {
         observer: selectedMission.observer,
         gasDropped: flightForm.gasDropped, eventNumber: flightForm.eventNumber,
         battalion: selectedMission.battalion,
+        policeLogbookEntered: flightForm.policeLogbookEntered,
       }),
     })
     if (!res.ok) {
@@ -431,7 +599,7 @@ export default function PilotDashboard() {
       setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' })
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false })
     fetchDB()
   }
 
@@ -441,7 +609,7 @@ export default function PilotDashboard() {
     setSelectedMission(null)
     setSimilarMission(null)
     setMissionPick('')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' })
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false })
     setFormError('')
     setFormSuccess('')
     setMissionError('')
@@ -450,6 +618,27 @@ export default function PilotDashboard() {
   const handleDelete = async (id: string) => {
     await fetch(`/api/flights?id=${id}`, { method: 'DELETE' })
     setConfirmId(null)
+    fetchDB()
+  }
+
+  const handleEditSave = async (updated: {
+    tailNumber: string; battery: string; startTime: string; endTime: string
+    gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
+  }) => {
+    if (!editFlight) return
+    const duration = updated.startTime && updated.endTime ? calcDuration(updated.startTime, updated.endTime) : 0
+    const res = await fetch('/api/flights', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: editFlight.id,
+        tailNumber: updated.tailNumber, battery: updated.battery,
+        startTime: updated.startTime, endTime: updated.endTime, duration,
+        gasDropped: updated.gasDropped, eventNumber: updated.eventNumber,
+        policeLogbookEntered: updated.policeLogbookEntered,
+      }),
+    })
+    if (!res.ok) throw new Error('save failed')
+    setEditFlight(null)
     fetchDB()
   }
 
@@ -468,6 +657,14 @@ export default function PilotDashboard() {
         />
       )}
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
+      {editFlight && (
+        <PilotFlightEditModal
+          flight={editFlight}
+          batteries={droneBatteries}
+          onSave={handleEditSave}
+          onCancel={() => setEditFlight(null)}
+        />
+      )}
 
       {/* Header */}
       <header className="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 sticky top-0 z-30">
@@ -841,6 +1038,15 @@ export default function PilotDashboard() {
                       )}
                     </div>
                   )}
+                  {/* Police logbook checkbox */}
+                  <div className="sm:col-span-2 bg-cyan-900/20 border border-cyan-700/40 rounded-xl p-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={flightForm.policeLogbookEntered}
+                        onChange={e => setFlightForm(f => ({ ...f, policeLogbookEntered: e.target.checked }))}
+                        className="w-4 h-4 accent-cyan-500" />
+                      <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Duration preview */}
@@ -863,7 +1069,7 @@ export default function PilotDashboard() {
                       {formSuccess}
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '' }) }}
+                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false }) }}
                         className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
                         טיסה נוספת למשימה זו
                       </button>
@@ -957,12 +1163,22 @@ export default function PilotDashboard() {
                                   💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}
                                 </span>
                               )}
+                              <span className={`inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-md border ${f.policeLogbookEntered ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300' : 'bg-slate-800/60 border-slate-600/50 text-slate-400'}`}>
+                                📘 {f.policeLogbookEntered ? 'לוג בוק: הוזן' : 'לוג בוק: לא הוזן'}
+                              </span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="text-right">
                               <p className="text-sm font-bold text-blue-400">{f.duration > 0 ? fmtHours(f.duration) : '—'}</p>
                             </div>
+                            <button onClick={() => setEditFlight(f)} title="עריכה"
+                              className="text-slate-600 hover:text-blue-400 transition-colors p-1.5 rounded-lg hover:bg-blue-900/20">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
                             <button onClick={() => setConfirmId(f.id)} title="מחיקה"
                               className="text-slate-600 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-red-900/20">
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

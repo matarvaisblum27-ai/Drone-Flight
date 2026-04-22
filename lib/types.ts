@@ -31,6 +31,7 @@ export interface Flight {
   gasDropped: boolean
   eventNumber: string // free-text event number for gas drops (stored in gas_drop_time column)
   battalion: string[]   // גדוד
+  policeLogbookEntered: boolean // בוצע הזנה ללוג בוק משטרתי
 }
 
 export interface FlightDB {
@@ -73,9 +74,11 @@ export interface DroneBattery {
   inspectionDate: string
 }
 
-/** Returns true when all operationally-important fields are filled. */
+/** Returns true when all operationally-important fields are filled.
+ *  Note: battery is optional — drones without registered batteries (e.g. Mavic 2, Matrice)
+ *  can still produce a "complete" flight record. */
 export function isFlightComplete(f: Flight): boolean {
-  return !!(f.missionName && f.tailNumber && f.battery && f.startTime && f.endTime && f.duration > 0)
+  return !!(f.missionName && f.tailNumber && f.startTime && f.endTime && f.duration > 0)
 }
 
 /** Lists human-readable names of missing fields for an incomplete flight. */
@@ -83,7 +86,6 @@ export function missingFields(f: Flight): string[] {
   const missing: string[] = []
   if (!f.missionName) missing.push('שם משימה')
   if (!f.tailNumber)  missing.push('מספר זנב')
-  if (!f.battery)     missing.push('סוללה')
   if (!f.startTime)   missing.push('שעת המראה')
   if (!f.endTime)     missing.push('שעת נחיתה')
   if (!f.duration)    missing.push('משך טיסה')

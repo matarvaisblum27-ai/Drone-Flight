@@ -286,6 +286,7 @@ type EditForm = {
   pilotId: string; date: string; missionName: string; tailNumber: string
   battery: string; startTime: string; endTime: string
   observers: string[]; gasDropped: boolean; eventNumber: string; battalions: string[]
+  policeLogbookEntered: boolean
 }
 
 function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
@@ -308,6 +309,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
     gasDropped:  flight.gasDropped  ?? false,
     eventNumber: flight.eventNumber ?? '',
     battalions:  flight.battalion.length > 0 ? [...flight.battalion] : [''],
+    policeLogbookEntered: flight.policeLogbookEntered ?? false,
   })
   const [error, setError] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
@@ -473,6 +475,14 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
               )}
             </div>
           )}
+          <div className="sm:col-span-2 bg-cyan-900/20 border border-cyan-700/40 rounded-xl p-4">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={form.policeLogbookEntered}
+                onChange={e => setForm(f => ({ ...f, policeLogbookEntered: e.target.checked }))}
+                className="w-4 h-4 accent-cyan-500" />
+              <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
+            </label>
+          </div>
         </div>
 
         {durationPreview !== null && durationPreview > 0 && (
@@ -1125,6 +1135,7 @@ export default function AdminDashboard() {
         startTime, endTime, duration,
         observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
         battalion: addForm.battalions.filter(Boolean),
+        policeLogbookEntered: false,
       }),
     })
     if (!res.ok) {
@@ -1154,6 +1165,7 @@ export default function AdminDashboard() {
         battery: form.battery, startTime: form.startTime, endTime: form.endTime, duration,
         observer: form.observers.filter(Boolean), gasDropped: form.gasDropped, eventNumber: form.eventNumber,
         battalion: form.battalions.filter(Boolean),
+        policeLogbookEntered: form.policeLogbookEntered,
       }),
     })
     setEditFlight(null)
@@ -2501,7 +2513,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-700/20 text-right">
-                        {['#', 'טייס', 'תצפיתן', 'זנב', 'הטלת גז', 'סוללה', 'שעות', 'משך', ...(canManageData ? ['פעולות'] : [])].map(h => (
+                        {['#', 'טייס', 'תצפיתן', 'זנב', 'הטלת גז', 'לוג בוק', 'סוללה', 'שעות', 'משך', ...(canManageData ? ['פעולות'] : [])].map(h => (
                           <th key={h} className="px-4 py-2 text-xs font-medium text-slate-500">{h}</th>
                         ))}
                       </tr>
@@ -2518,6 +2530,11 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             {f.gasDropped
                               ? <span className="text-amber-400 font-medium">✓{f.eventNumber ? ` ${f.eventNumber}` : ''}</span>
                               : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {f.policeLogbookEntered
+                              ? <span className="text-cyan-300 font-medium">📘 הוזן</span>
+                              : <span className="text-slate-600">לא הוזן</span>}
                           </td>
                           <td className="px-4 py-3">
                             <span className="bg-slate-700/50 px-2 py-0.5 rounded text-xs text-slate-300">{f.battery}</span>

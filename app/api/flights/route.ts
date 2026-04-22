@@ -37,6 +37,7 @@ function rowToFlight(row: any): Flight {
     gasDropped:  row.gas_dropped   ?? false,
     eventNumber: row.gas_drop_time ?? '',  // reuse existing column for event number
     battalion:   parseArray(row.battalion),
+    policeLogbookEntered: row.police_logbook_entered ?? false,
   }
 }
 
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
   const [pilotsRes, flightsRes, migrated] = await Promise.all([
     supabase.from('pilots').select('id,name,license,is_admin').order('name'),
     supabase.from('flights')
-      .select('id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion')
+      .select('id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion,police_logbook_entered')
       .order('date').order('start_time'),
     hasMigration(),
   ])
@@ -115,6 +116,7 @@ export async function POST(req: NextRequest) {
     gas_dropped:   body.gasDropped   ?? false,
     gas_drop_time: body.eventNumber  || null,
     battalion:     JSON.stringify(toArr(body.battalion)),
+    police_logbook_entered: body.policeLogbookEntered ?? false,
   }
 
   const { data, error } = await supabase.from('flights').insert(record).select().single()
@@ -168,6 +170,9 @@ export async function PUT(req: NextRequest) {
   updates.battalion = body.battalion !== undefined
     ? JSON.stringify(toArr2(body.battalion))
     : (existing.battalion ?? '[]')
+  updates.police_logbook_entered = body.policeLogbookEntered !== undefined
+    ? !!body.policeLogbookEntered
+    : (existing.police_logbook_entered ?? false)
 
   const { data, error } = await supabase
     .from('flights').update(updates).eq('id', body.id).select().single()
