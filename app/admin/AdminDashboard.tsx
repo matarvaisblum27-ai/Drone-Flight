@@ -761,6 +761,7 @@ export default function AdminDashboard() {
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
     observers: [''], gasDropped: false, eventNumber: '', battalions: [''],
+    policeLogbookEntered: false,
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
@@ -1135,7 +1136,7 @@ export default function AdminDashboard() {
         startTime, endTime, duration,
         observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
         battalion: addForm.battalions.filter(Boolean),
-        policeLogbookEntered: false,
+        policeLogbookEntered: addForm.policeLogbookEntered,
       }),
     })
     if (!res.ok) {
@@ -1143,7 +1144,7 @@ export default function AdminDashboard() {
       setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''] })
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false })
     fetchDB()
   }
 
@@ -2394,6 +2395,14 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   )}
                 </div>
               )}
+              <div className="sm:col-span-2 bg-cyan-900/20 border border-cyan-700/40 rounded-xl p-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={addForm.policeLogbookEntered}
+                    onChange={e => setAddForm(f => ({ ...f, policeLogbookEntered: e.target.checked }))}
+                    className="w-4 h-4 accent-cyan-500" />
+                  <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
+                </label>
+              </div>
             </div>
             {addError && <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{addError}</div>}
             {addSuccess && (
