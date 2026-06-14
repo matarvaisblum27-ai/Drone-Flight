@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, isFlightComplete, missingFields } from '@/lib/types'
+import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, isFlightComplete, missingFields } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -287,6 +287,7 @@ type EditForm = {
   battery: string; startTime: string; endTime: string
   observers: string[]; gasDropped: boolean; eventNumber: string; battalions: string[]
   policeLogbookEntered: boolean
+  batteryCount: number; note: string
 }
 
 function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
@@ -310,6 +311,8 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
     eventNumber: flight.eventNumber ?? '',
     battalions:  flight.battalion.length > 0 ? [...flight.battalion] : [''],
     policeLogbookEntered: flight.policeLogbookEntered ?? false,
+    batteryCount: flight.batteryCount ?? 1,
+    note:         flight.note ?? '',
   })
   const [error, setError] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
@@ -482,6 +485,20 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
                 className="w-4 h-4 accent-cyan-500" />
               <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
             </label>
+          </div>
+          <div>
+            <label className={labelCls}>מספר סוללות</label>
+            <input type="number" min={1} max={20} value={form.batteryCount}
+              onChange={e => setForm(f => ({ ...f, batteryCount: Math.max(1, Number(e.target.value) || 1) }))}
+              className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>
+              הערה (עד 50) <span className="text-slate-500">{form.note.length}/50</span>
+            </label>
+            <input type="text" maxLength={50} value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value.slice(0, 50) }))}
+              placeholder="שיבוש, אנטנה מיוחדת..." className={inputCls} />
           </div>
         </div>
 
@@ -756,12 +773,13 @@ export default function AdminDashboard() {
   useInactivityLogout()
   const router = useRouter()
   const [db, setDb] = useState<FlightDB | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'pilots' | 'batteries' | 'drones' | 'logs'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'trainings' | 'pilots' | 'batteries' | 'drones' | 'logs'>('overview')
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
     observers: [''], gasDropped: false, eventNumber: '', battalions: [''],
     policeLogbookEntered: false,
+    batteryCount: 1, note: '',
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
@@ -780,6 +798,7 @@ export default function AdminDashboard() {
   const [editPilot, setEditPilot] = useState<Pilot | 'add' | null>(null)
   const [droneDetails, setDroneDetails] = useState<DroneInfo[]>([])
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
+  const [allMissions, setAllMissions] = useState<Mission[]>([])
   const [expandedDrone, setExpandedDrone] = useState<string | null>(null)
   const [editDroneModal, setEditDroneModal] = useState<DroneInfo | 'new' | null>(null)
   const [confirmDeleteDroneId, setConfirmDeleteDroneId] = useState<string | null>(null)
@@ -852,6 +871,11 @@ export default function AdminDashboard() {
     if (batteriesRes.ok) setDroneBatteries(await batteriesRes.json())
   }, [])
 
+  const fetchMissions = useCallback(async () => {
+    const res = await fetch('/api/missions', { cache: 'no-store' })
+    if (res.ok) setAllMissions(await res.json())
+  }, [])
+
   const fetchGasDrops = useCallback(async () => {
     const res = await fetch('/api/gas-drops', { cache: 'no-store' })
     if (res.ok) setGasDrops(await res.json())
@@ -904,6 +928,7 @@ export default function AdminDashboard() {
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchDroneData() }, [authChecked, fetchDroneData])
   useEffect(() => { if (authChecked) fetchGasDrops() }, [authChecked, fetchGasDrops])
+  useEffect(() => { if (authChecked) fetchMissions() }, [authChecked, fetchMissions])
   // Login logs — load on tab open, then auto-refresh every 30 s
   useEffect(() => {
     if (!authChecked || activeTab !== 'logs') return
@@ -938,6 +963,10 @@ export default function AdminDashboard() {
   const thisYear = String(now.getFullYear())
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const totalMinutes = db.flights.reduce((a, f) => a + f.duration, 0)
+  // Set of training mission IDs — used to split operational vs training hours
+  // and to highlight training flights in lists.
+  const trainingMissionIdSet = new Set(allMissions.filter(m => m.isTraining).map(m => m.id))
+  const trainingFlights = db.flights.filter(f => f.missionId && trainingMissionIdSet.has(f.missionId))
   // Count UNIQUE missions (not individual flights) using missionId or date+name as key
   const missionKeyFn = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
   const missionsThisMonth = new Set(db.flights.filter(f => f.date.startsWith(thisMonth)).map(missionKeyFn)).size
@@ -1137,6 +1166,8 @@ export default function AdminDashboard() {
         observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
         battalion: addForm.battalions.filter(Boolean),
         policeLogbookEntered: addForm.policeLogbookEntered,
+        batteryCount: addForm.batteryCount,
+        note: addForm.note,
       }),
     })
     if (!res.ok) {
@@ -1144,7 +1175,7 @@ export default function AdminDashboard() {
       setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false })
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false, batteryCount: 1, note: '' })
     fetchDB()
   }
 
@@ -1167,6 +1198,8 @@ export default function AdminDashboard() {
         observer: form.observers.filter(Boolean), gasDropped: form.gasDropped, eventNumber: form.eventNumber,
         battalion: form.battalions.filter(Boolean),
         policeLogbookEntered: form.policeLogbookEntered,
+        batteryCount: form.batteryCount,
+        note: form.note,
       }),
     })
     setEditFlight(null)
@@ -1855,6 +1888,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', minLevel: 'viewer'  },
             { key: 'add',        label: 'הוספת טיסה',      icon: '➕', minLevel: 'deputy'  },
             { key: 'history',    label: 'היסטוריה',        icon: '📜', minLevel: 'viewer'  },
+            { key: 'trainings',  label: 'אימונים',         icon: '🎓', minLevel: 'viewer'  },
             { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️', minLevel: 'viewer'  },
             { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋', minLevel: 'viewer'  },
             { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁', minLevel: 'viewer'  },
@@ -2403,6 +2437,20 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
                 </label>
               </div>
+              <div>
+                <label className={labelCls}>מספר סוללות</label>
+                <input type="number" min={1} max={20} value={addForm.batteryCount}
+                  onChange={e => setAddForm(f => ({ ...f, batteryCount: Math.max(1, Number(e.target.value) || 1) }))}
+                  className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  הערה (עד 50) <span className="text-slate-500">{addForm.note.length}/50</span>
+                </label>
+                <input type="text" maxLength={50} value={addForm.note}
+                  onChange={e => setAddForm(f => ({ ...f, note: e.target.value.slice(0, 50) }))}
+                  placeholder="שיבוש, אנטנה מיוחדת..." className={inputCls} />
+              </div>
             </div>
             {addError && <div className="mt-4 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-sm text-red-400">{addError}</div>}
             {addSuccess && (
@@ -2589,6 +2637,70 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         )}
 
         {/* PILOTS */}
+        {/* TRAININGS */}
+        {activeTab === 'trainings' && (
+          <div className="space-y-5">
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span className="text-purple-400">🎓</span> כל האימונים השנה
+                </h2>
+                <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <span>סך אימונים: <strong className="text-purple-300">{allMissions.filter(m => m.isTraining && m.date.startsWith(thisYear)).length}</strong></span>
+                  <span>·</span>
+                  <span>סך שעות אימון: <strong className="text-purple-300">{fmtHours(trainingFlights.filter(f => f.date.startsWith(thisYear)).reduce((a, f) => a + f.duration, 0))}</strong></span>
+                </div>
+              </div>
+              {(() => {
+                const yearTrainings = allMissions
+                  .filter(m => m.isTraining && m.date.startsWith(thisYear))
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                if (yearTrainings.length === 0) return (
+                  <div className="text-center py-12 text-slate-500 text-sm">
+                    🎓 לא נרשמו אימונים השנה עדיין
+                  </div>
+                )
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-700/30 text-right">
+                          {['#', 'תאריך', 'כותרת / מהות', 'טייסים', 'טיסות', 'סה"כ שעות'].map(h => (
+                            <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700/30">
+                        {yearTrainings.map((m, i) => {
+                          const tFlights = db.flights.filter(f => f.missionId === m.id)
+                          const pilots = Array.from(new Set(tFlights.map(f => f.pilotName)))
+                          const mins = tFlights.reduce((a, f) => a + f.duration, 0)
+                          return (
+                            <tr key={m.id} className="hover:bg-slate-700/20 transition-colors">
+                              <td className="px-4 py-3 text-slate-500 text-xs">{i + 1}</td>
+                              <td className="px-4 py-3 text-slate-300 text-xs whitespace-nowrap">
+                                {new Date(m.date).toLocaleDateString('he-IL')}
+                              </td>
+                              <td className="px-4 py-3 text-white font-medium">
+                                <span className="inline-flex items-center gap-2">
+                                  <span className="text-purple-300">🎓</span> {m.name}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-300 text-xs">{pilots.join(', ') || '—'}</td>
+                              <td className="px-4 py-3 text-slate-300 text-center">{tFlights.length}</td>
+                              <td className="px-4 py-3 text-purple-300 font-medium whitespace-nowrap">{fmtHours(mins)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'pilots' && (
           <div className="space-y-5">
             {/* Top buttons — admin only */}
@@ -2827,6 +2939,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))).map(drone => {
                       const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
                       const totalMins = dFlights.reduce((a: number, f: Flight) => a + f.duration, 0)
+                      const trainingMins = dFlights.reduce((a: number, f: Flight) => a + (f.missionId && trainingMissionIdSet.has(f.missionId) ? f.duration : 0), 0)
+                      const operationalMins = totalMins - trainingMins
                       const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
                       const batteries = droneBatteries.filter(b => b.droneTailNumber === drone.tailNumber)
                       const isExpanded = expandedDrone === drone.tailNumber
@@ -2847,7 +2961,18 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                               <span className="text-xs font-mono text-slate-400 break-all">{drone.serialNumber || '—'}</span>
                             </td>
                             <td className="px-4 py-3 text-slate-300 text-center">{dFlights.length}</td>
-                            <td className="px-4 py-3 text-blue-400 font-medium">{fmtHours(totalMins)}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col">
+                                <span className="text-blue-400 font-medium">{fmtHours(totalMins)}</span>
+                                {trainingMins > 0 && (
+                                  <span className="text-[10px] text-slate-400 mt-0.5">
+                                    <span className="text-green-300">מבצעי: {fmtHours(operationalMins)}</span>
+                                    {' · '}
+                                    <span className="text-purple-300">אימון: {fmtHours(trainingMins)}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-3 text-slate-400 text-xs">
                               {lastDate ? new Date(lastDate).toLocaleDateString('he-IL') : '—'}
                             </td>

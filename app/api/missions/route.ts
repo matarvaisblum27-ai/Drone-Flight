@@ -27,6 +27,7 @@ function rowToMission(row: any): Mission {
     observer:      parseArray(row.observer),
     missionNumber: row.mission_number ?? 1,
     createdAt:     row.created_at    ?? '',
+    isTraining:    row.is_training   ?? false,
   }
 }
 
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     battalion:      JSON.stringify(toArr(body.battalion)),
     observer:       JSON.stringify(toArr(body.observer)),
     mission_number: missionNumber,
+    is_training:    !!body.isTraining,
   }
 
   const { data, error } = await supabase.from('missions').insert(record).select().single()

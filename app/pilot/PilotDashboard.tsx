@@ -148,6 +148,7 @@ function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
   onSave: (updated: {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
+    batteryCount: number; note: string
   }) => Promise<void>
   onCancel: () => void
 }) {
@@ -159,6 +160,8 @@ function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
     gasDropped: flight.gasDropped ?? false,
     eventNumber: flight.eventNumber ?? '',
     policeLogbookEntered: flight.policeLogbookEntered ?? false,
+    batteryCount: flight.batteryCount ?? 1,
+    note: flight.note ?? '',
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -236,6 +239,12 @@ function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
               </select>
             )}
           </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>מספר סוללות שהשתמשת</label>
+            <input type="number" min={1} max={20} value={form.batteryCount}
+              onChange={e => setForm(f => ({ ...f, batteryCount: Math.max(1, Number(e.target.value) || 1) }))}
+              className={inputCls} />
+          </div>
           <div>
             <label className={labelCls}>שעת המראה</label>
             <input type="time" value={form.startTime}
@@ -274,6 +283,15 @@ function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
                 className="w-4 h-4 accent-cyan-500" />
               <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
             </label>
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>
+              הערה (עד 50 תווים) — <span className="text-slate-500">{form.note.length}/50</span>
+            </label>
+            <input type="text" maxLength={50} value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value.slice(0, 50) }))}
+              placeholder="לדוגמה: שיבוש, אנטנה מיוחדת, מס׳ אירוע..."
+              className={inputCls} />
           </div>
         </div>
 
@@ -380,11 +398,12 @@ export default function PilotDashboard() {
   const [userName, setUserName] = useState('')
   const [db, setDb] = useState<FlightDB | null>(null)
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
+  const [allMissions, setAllMissions] = useState<Mission[]>([])
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
 
   // ── Mission step (step 1) ─────────────────────────────────────────────────
   const [addStep, setAddStep] = useState<'mission' | 'flight'>('mission')
-  const [missionForm, setMissionForm] = useState({ date: '', name: '', battalions: [''], observers: [''] })
+  const [missionForm, setMissionForm] = useState({ date: '', name: '', battalions: [''], observers: [''], isTraining: false })
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
   const [similarMission, setSimilarMission] = useState<Mission | null>(null) // pending join dialog
   // missionPick: '' = nothing picked yet, 'new' = create new, otherwise = existing mission name
@@ -397,6 +416,8 @@ export default function PilotDashboard() {
     tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '',
     gasDropped: false, eventNumber: '',
     policeLogbookEntered: false,
+    batteryCount: 1,
+    note: '',
   })
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -432,9 +453,18 @@ export default function PilotDashboard() {
     if (res.ok) setDroneBatteries(await res.json())
   }, [])
 
+  const fetchMissions = useCallback(async () => {
+    const res = await fetch('/api/missions', { cache: 'no-store' })
+    if (res.ok) setAllMissions(await res.json())
+  }, [])
+
   // Only fetch data after auth is confirmed
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchBatteries() }, [authChecked, fetchBatteries])
+  useEffect(() => { if (authChecked) fetchMissions() }, [authChecked, fetchMissions])
+
+  // Map of missionId → isTraining for fast lookup
+  const trainingMissionIds = new Set(allMissions.filter(m => m.isTraining).map(m => m.id))
 
   // ── Hard auth gate — render NOTHING until session is confirmed ───────────
   if (!authChecked) {
@@ -524,6 +554,7 @@ export default function PilotDashboard() {
       const virtualMissions: Mission[] = legacyNames.map((name, i) => ({
         id: '', date: missionForm.date, name,
         battalion: [], observer: [], missionNumber: i + 1, createdAt: '',
+        isTraining: false,
       }))
 
       // 3) Find fuzzy match among all candidates
@@ -553,7 +584,13 @@ export default function PilotDashboard() {
   const createMissionAndProceed = async () => {
     const res = await fetch('/api/missions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: missionForm.date, name: missionForm.name.trim(), battalion: missionForm.battalions.filter(Boolean), observer: missionForm.observers.filter(Boolean) }),
+      body: JSON.stringify({
+        date: missionForm.date,
+        name: missionForm.name.trim(),
+        battalion: missionForm.isTraining ? [] : missionForm.battalions.filter(Boolean),
+        observer: missionForm.observers.filter(Boolean),
+        isTraining: missionForm.isTraining,
+      }),
     })
     if (!res.ok) { setMissionError('שגיאה ביצירת משימה'); return }
     const mission: Mission = await res.json()
@@ -592,6 +629,8 @@ export default function PilotDashboard() {
         gasDropped: flightForm.gasDropped, eventNumber: flightForm.eventNumber,
         battalion: selectedMission.battalion,
         policeLogbookEntered: flightForm.policeLogbookEntered,
+        batteryCount: flightForm.batteryCount,
+        note: flightForm.note,
       }),
     })
     if (!res.ok) {
@@ -599,17 +638,17 @@ export default function PilotDashboard() {
       setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
     setFormSuccess('טיסה נרשמה בהצלחה!')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false })
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' })
     fetchDB()
   }
 
   const resetAddFlow = () => {
     setAddStep('mission')
-    setMissionForm({ date: '', name: '', battalions: [''], observers: [''] })
+    setMissionForm({ date: '', name: '', battalions: [''], observers: [''], isTraining: false })
     setSelectedMission(null)
     setSimilarMission(null)
     setMissionPick('')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false })
+    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' })
     setFormError('')
     setFormSuccess('')
     setMissionError('')
@@ -624,6 +663,7 @@ export default function PilotDashboard() {
   const handleEditSave = async (updated: {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
+    batteryCount: number; note: string
   }) => {
     if (!editFlight) return
     const duration = updated.startTime && updated.endTime ? calcDuration(updated.startTime, updated.endTime) : 0
@@ -635,6 +675,8 @@ export default function PilotDashboard() {
         startTime: updated.startTime, endTime: updated.endTime, duration,
         gasDropped: updated.gasDropped, eventNumber: updated.eventNumber,
         policeLogbookEntered: updated.policeLogbookEntered,
+        batteryCount: updated.batteryCount,
+        note: updated.note,
       }),
     })
     if (!res.ok) throw new Error('save failed')
@@ -859,8 +901,23 @@ export default function PilotDashboard() {
                       className={inputCls} />
                   </div>
 
-                  {/* Mission picker dropdown (shown when there are existing missions on this date) */}
-                  {showDropdown && (
+                  {/* Training toggle */}
+                  <div className="bg-purple-900/20 border border-purple-700/40 rounded-xl p-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={missionForm.isTraining}
+                        onChange={e => {
+                          const v = e.target.checked
+                          setMissionForm(f => ({ ...f, isTraining: v, battalions: v ? [''] : f.battalions }))
+                          if (v) setMissionPick('new')
+                        }}
+                        className="w-4 h-4 accent-purple-500" />
+                      <span className="text-sm text-purple-200 font-medium">🎓 טיסת אימון</span>
+                      <span className="text-xs text-purple-300/70 mr-auto">(במקום משימה מבצעית)</span>
+                    </label>
+                  </div>
+
+                  {/* Mission picker dropdown (shown when there are existing missions on this date and not training) */}
+                  {showDropdown && !missionForm.isTraining && (
                     <div>
                       <label className={labelCls}>בחר משימה קיימת או צור חדשה <span className="text-red-400">*</span></label>
                       <select
@@ -880,12 +937,17 @@ export default function PilotDashboard() {
                   {/* New mission fields (shown when creating new, or no existing missions) */}
                   {isCreatingNew && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelCls}>שם משימה <span className="text-red-400">*</span></label>
-                        <input type="text" placeholder="מפ שועפט, חיפוי כוחות..." value={missionForm.name}
+                      <div className={missionForm.isTraining ? 'sm:col-span-2' : ''}>
+                        <label className={labelCls}>
+                          {missionForm.isTraining ? 'מהות האימון / כותרת' : 'שם משימה'} <span className="text-red-400">*</span>
+                        </label>
+                        <input type="text"
+                          placeholder={missionForm.isTraining ? 'לדוגמה: אימון חירום, ניווט לילה...' : 'מפ שועפט, חיפוי כוחות...'}
+                          value={missionForm.name}
                           onChange={e => setMissionForm(f => ({ ...f, name: e.target.value }))}
                           className={inputCls} />
                       </div>
+                      {!missionForm.isTraining && (
                       <div className="sm:col-span-2">
                         <label className={labelCls}>גדוד (אופציונלי)</label>
                         <div className="space-y-2">
@@ -917,6 +979,7 @@ export default function PilotDashboard() {
                           </button>
                         </div>
                       </div>
+                      )}
                       <div className="sm:col-span-2">
                         <label className={labelCls}>תצפיתן (אופציונלי)</label>
                         <div className="space-y-2">
@@ -1008,6 +1071,12 @@ export default function PilotDashboard() {
                     })()}
                   </div>
                   <div>
+                    <label className={labelCls}>מספר סוללות שהשתמשת</label>
+                    <input type="number" min={1} max={20} value={flightForm.batteryCount}
+                      onChange={e => setFlightForm(f => ({ ...f, batteryCount: Math.max(1, Number(e.target.value) || 1) }))}
+                      className={inputCls} />
+                  </div>
+                  <div>
                     <label className={labelCls}>שעת המראה</label>
                     <input type="time" value={flightForm.startTime}
                       onChange={e => setFlightForm(f => ({ ...f, startTime: e.target.value }))}
@@ -1047,6 +1116,16 @@ export default function PilotDashboard() {
                       <span className="text-sm text-cyan-200">📘 בוצעה הזנה ללוג בוק משטרתי</span>
                     </label>
                   </div>
+                  {/* Free-text note */}
+                  <div className="sm:col-span-2">
+                    <label className={labelCls}>
+                      הערה (עד 50 תווים) — <span className="text-slate-500">{flightForm.note.length}/50</span>
+                    </label>
+                    <input type="text" maxLength={50} value={flightForm.note}
+                      onChange={e => setFlightForm(f => ({ ...f, note: e.target.value.slice(0, 50) }))}
+                      placeholder="לדוגמה: שיבוש, אנטנה מיוחדת, מס׳ אירוע..."
+                      className={inputCls} />
+                  </div>
                 </div>
 
                 {/* Duration preview */}
@@ -1069,7 +1148,7 @@ export default function PilotDashboard() {
                       {formSuccess}
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false }) }}
+                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' }) }}
                         className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
                         טיסה נוספת למשימה זו
                       </button>
@@ -1121,13 +1200,17 @@ export default function PilotDashboard() {
                 const monthBorder = ['border-l-blue-500', 'border-l-green-500', 'border-l-yellow-500'][monthIdx % 3]
                 const monthBadge  = ['bg-blue-900/40 text-blue-300 border-blue-700/40', 'bg-green-900/40 text-green-300 border-green-700/40', 'bg-yellow-900/40 text-yellow-300 border-yellow-700/40'][monthIdx % 3]
                 const monthName   = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'][monthIdx]
+                const isTrainingGroup = group.flights[0]?.missionId ? trainingMissionIds.has(group.flights[0].missionId) : false
                 return (
-                <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${monthBorder} rounded-xl overflow-hidden`}>
+                <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${isTrainingGroup ? 'border-l-purple-500' : monthBorder} rounded-xl overflow-hidden`}>
                   {/* Mission header */}
-                  <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3">
+                  <div className={`${isTrainingGroup ? 'bg-purple-900/30 border-purple-700/30' : 'bg-indigo-900/30 border-indigo-700/30'} border-b px-5 py-3 flex items-center gap-3`}>
                     <span className={`text-xs px-1.5 py-0.5 rounded border font-medium shrink-0 ${monthBadge}`}>{monthName}</span>
+                    {isTrainingGroup && (
+                      <span className="text-xs bg-purple-900/50 text-purple-300 border border-purple-700/50 px-1.5 py-0.5 rounded font-medium shrink-0">🎓 אימון</span>
+                    )}
                     <span className="text-white text-sm font-semibold truncate flex-1">
-                      📋 {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
+                      {isTrainingGroup ? '🎓' : '📋'} {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                     </span>
                     <span className="text-xs text-slate-400 shrink-0">
                       {new Date(group.date).toLocaleDateString('he-IL')}
@@ -1156,6 +1239,11 @@ export default function PilotDashboard() {
                             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
                               <span>✈️ {droneLabel(f.tailNumber)}</span>
                               {f.battery && <span>🔋 {f.battery}</span>}
+                              {f.batteryCount > 1 && (
+                                <span className="inline-flex items-center gap-1 bg-blue-900/30 border border-blue-700/50 text-blue-300 font-medium px-2 py-0.5 rounded-md">
+                                  🔋×{f.batteryCount}
+                                </span>
+                              )}
                               {f.startTime && f.endTime && <span>🕐 {f.startTime}–{f.endTime}</span>}
                               {f.observer.length > 0 && <span>👁 {f.observer.join(', ')}</span>}
                               {f.gasDropped && (
@@ -1166,6 +1254,11 @@ export default function PilotDashboard() {
                               <span className={`inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-md border ${f.policeLogbookEntered ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300' : 'bg-slate-800/60 border-slate-600/50 text-slate-400'}`}>
                                 📘 {f.policeLogbookEntered ? 'לוג בוק: הוזן' : 'לוג בוק: לא הוזן'}
                               </span>
+                              {f.note && (
+                                <span className="inline-flex items-center gap-1 bg-slate-700/40 border border-slate-600/50 text-slate-200 px-2 py-0.5 rounded-md italic" title={f.note}>
+                                  📝 {f.note}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">

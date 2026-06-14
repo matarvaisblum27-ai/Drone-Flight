@@ -13,6 +13,7 @@ export interface Mission {
   observer: string[]
   missionNumber: number
   createdAt: string
+  isTraining: boolean   // טיסת אימון (במקום משימה מבצעית). שם המשימה משמש כ"מהות האימון"
 }
 
 export interface Flight {
@@ -32,7 +33,13 @@ export interface Flight {
   eventNumber: string // free-text event number for gas drops (stored in gas_drop_time column)
   battalion: string[]   // גדוד
   policeLogbookEntered: boolean // בוצע הזנה ללוג בוק משטרתי
+  batteryCount: number  // כמה סוללות נצרכו לטיסה רצופה (ברירת מחדל 1)
+  note: string          // הערה חופשית, עד 50 תווים (אכיפה ב-UI)
+  isTraining?: boolean  // נגזר מ-Mission.isTraining — לא נשמר ישירות בטיסה
 }
+
+/** Max length for the free-text per-flight note. */
+export const FLIGHT_NOTE_MAX_LEN = 50
 
 export interface FlightDB {
   pilots: Pilot[]
