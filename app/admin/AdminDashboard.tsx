@@ -780,6 +780,7 @@ export default function AdminDashboard() {
     observers: [''], gasDropped: false, eventNumber: '', battalions: [''],
     policeLogbookEntered: false,
     batteryCount: 1, note: '',
+    isTraining: false,
   })
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
@@ -1172,14 +1173,39 @@ export default function AdminDashboard() {
     }
     const pilot = db.pilots.find(p => p.id === pilotId)!
     const duration = startTime && endTime ? calcDuration(startTime, endTime) : 0
+
+    // If admin marked this as a training flight, create a training mission so it
+    // shows up properly in the trainings tab and the operational/training split.
+    let missionId: string | undefined
+    if (addForm.isTraining) {
+      const trainingName = addForm.missionName.trim() || 'אימון'
+      const missionRes = await fetch('/api/missions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date,
+          name: trainingName,
+          battalion: [],
+          observer: addForm.observers.filter(Boolean),
+          isTraining: true,
+        }),
+      })
+      if (!missionRes.ok) {
+        setAddError('שגיאה ביצירת רשומת אימון')
+        return
+      }
+      const mission = await missionRes.json()
+      missionId = mission.id
+    }
+
     const res = await fetch('/api/flights', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pilotId, pilotName: pilot.name, date,
         missionName: addForm.missionName, tailNumber: addForm.tailNumber, battery: addForm.battery,
+        missionId,
         startTime, endTime, duration,
         observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
-        battalion: addForm.battalions.filter(Boolean),
+        battalion: addForm.isTraining ? [] : addForm.battalions.filter(Boolean),
         policeLogbookEntered: addForm.policeLogbookEntered,
         batteryCount: addForm.batteryCount,
         note: addForm.note,
@@ -1189,8 +1215,9 @@ export default function AdminDashboard() {
       const err = await res.json().catch(() => ({}))
       setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
     }
-    setAddSuccess(`טיסה נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false, batteryCount: 1, note: '' })
+    setAddSuccess(`טיסה ${addForm.isTraining ? 'אימון ' : ''}נוספה בהצלחה עבור ${pilot.name}`)
+    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false, batteryCount: 1, note: '', isTraining: false })
+    fetchMissions()
     fetchDB()
   }
 
@@ -2328,9 +2355,22 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <label className={labelCls}>תאריך</label>
                 <input type="date" value={addForm.date} onChange={e => setAddForm(f => ({ ...f, date: e.target.value }))} className={inputCls} />
               </div>
+              <div className="sm:col-span-2 bg-purple-900/20 border border-purple-700/40 rounded-xl p-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={addForm.isTraining}
+                    onChange={e => setAddForm(f => ({ ...f, isTraining: e.target.checked, battalions: e.target.checked ? [''] : f.battalions }))}
+                    className="w-4 h-4 accent-purple-500" />
+                  <span className="text-sm text-purple-200 font-medium">🎓 טיסת אימון</span>
+                  <span className="text-xs text-purple-300/70 mr-auto">(במקום משימה מבצעית)</span>
+                </label>
+              </div>
               <div>
-                <label className={labelCls}>שם משימה</label>
-                <input type="text" placeholder="סיור לילי..." value={addForm.missionName}
+                <label className={labelCls}>
+                  {addForm.isTraining ? 'מהות האימון / כותרת' : 'שם משימה'}
+                </label>
+                <input type="text"
+                  placeholder={addForm.isTraining ? 'לדוגמה: אימון חירום, ניווט לילה...' : 'סיור לילי...'}
+                  value={addForm.missionName}
                   onChange={e => setAddForm(f => ({ ...f, missionName: e.target.value }))} className={inputCls} />
               </div>
               <div>
@@ -2394,6 +2434,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </button>
                 </div>
               </div>
+              {!addForm.isTraining && (
               <div className="sm:col-span-2">
                 <label className={labelCls}>גדוד (אופציונלי)</label>
                 <div className="space-y-2">
@@ -2425,6 +2466,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </button>
                 </div>
               </div>
+              )}
               {(addForm.tailNumber === '4x-ujs' || addForm.tailNumber === '4x-xpg') && (
                 <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
                   <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
