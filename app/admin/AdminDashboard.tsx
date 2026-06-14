@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, isFlightComplete, missingFields } from '@/lib/types'
+import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -964,9 +964,24 @@ export default function AdminDashboard() {
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const totalMinutes = db.flights.reduce((a, f) => a + f.duration, 0)
   // Set of training mission IDs — used to split operational vs training hours
-  // and to highlight training flights in lists.
-  const trainingMissionIdSet = new Set(allMissions.filter(m => m.isTraining).map(m => m.id))
-  const trainingFlights = db.flights.filter(f => f.missionId && trainingMissionIdSet.has(f.missionId))
+  // and to highlight training flights in lists. Includes both:
+  //   1. Missions explicitly flagged is_training=true (new structured data)
+  //   2. Missions whose name contains 'אימון' (legacy data — שמכיל 'אימון')
+  const missionsById = new Map(allMissions.map(m => [m.id, m]))
+  const trainingMissionIdSet = new Set(
+    allMissions.filter(m => m.isTraining || isTrainingName(m.name)).map(m => m.id)
+  )
+  // A flight counts as training if its linked mission is training OR
+  // its mission_name string contains 'אימון' (covers legacy rows with no mission link).
+  const isFlightTraining = (f: Flight): boolean => {
+    if (f.missionId && trainingMissionIdSet.has(f.missionId)) return true
+    if (f.missionId) {
+      const m = missionsById.get(f.missionId)
+      if (m && (m.isTraining || isTrainingName(m.name))) return true
+    }
+    return isTrainingName(f.missionName)
+  }
+  const trainingFlights = db.flights.filter(isFlightTraining)
   // Count UNIQUE missions (not individual flights) using missionId or date+name as key
   const missionKeyFn = (f: Flight) => f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
   const missionsThisMonth = new Set(db.flights.filter(f => f.date.startsWith(thisMonth)).map(missionKeyFn)).size
@@ -2641,60 +2656,74 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {activeTab === 'trainings' && (
           <div className="space-y-5">
             <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <span className="text-purple-400">🎓</span> כל האימונים השנה
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-slate-400">
-                  <span>סך אימונים: <strong className="text-purple-300">{allMissions.filter(m => m.isTraining && m.date.startsWith(thisYear)).length}</strong></span>
-                  <span>·</span>
-                  <span>סך שעות אימון: <strong className="text-purple-300">{fmtHours(trainingFlights.filter(f => f.date.startsWith(thisYear)).reduce((a, f) => a + f.duration, 0))}</strong></span>
-                </div>
-              </div>
               {(() => {
-                const yearTrainings = allMissions
-                  .filter(m => m.isTraining && m.date.startsWith(thisYear))
-                  .sort((a, b) => b.date.localeCompare(a.date))
-                if (yearTrainings.length === 0) return (
-                  <div className="text-center py-12 text-slate-500 text-sm">
-                    🎓 לא נרשמו אימונים השנה עדיין
-                  </div>
-                )
+                // Build training groups from FLIGHTS so we catch both new (is_training=true) AND
+                // legacy missions identified by name ('אימון ...'). Group by mission key (missionId
+                // or date+name) to avoid duplicating across flights of the same training session.
+                interface TrainingGroup { key: string; date: string; name: string; flights: Flight[]; pilots: Set<string>; minutes: number }
+                const groups = new Map<string, TrainingGroup>()
+                for (const f of trainingFlights) {
+                  if (!f.date.startsWith(thisYear)) continue
+                  const key = f.missionId ? `m:${f.missionId}` : `d:${f.date}||${f.missionName}`
+                  if (!groups.has(key)) {
+                    groups.set(key, { key, date: f.date, name: f.missionName || 'ללא שם', flights: [], pilots: new Set(), minutes: 0 })
+                  }
+                  const g = groups.get(key)!
+                  g.flights.push(f)
+                  g.pilots.add(f.pilotName)
+                  g.minutes += f.duration
+                }
+                const yearTrainings = Array.from(groups.values()).sort((a, b) => b.date.localeCompare(a.date))
+                const totalMinutes = yearTrainings.reduce((a, g) => a + g.minutes, 0)
+
                 return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-slate-700/30 text-right">
-                          {['#', 'תאריך', 'כותרת / מהות', 'טייסים', 'טיסות', 'סה"כ שעות'].map(h => (
-                            <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700/30">
-                        {yearTrainings.map((m, i) => {
-                          const tFlights = db.flights.filter(f => f.missionId === m.id)
-                          const pilots = Array.from(new Set(tFlights.map(f => f.pilotName)))
-                          const mins = tFlights.reduce((a, f) => a + f.duration, 0)
-                          return (
-                            <tr key={m.id} className="hover:bg-slate-700/20 transition-colors">
-                              <td className="px-4 py-3 text-slate-500 text-xs">{i + 1}</td>
-                              <td className="px-4 py-3 text-slate-300 text-xs whitespace-nowrap">
-                                {new Date(m.date).toLocaleDateString('he-IL')}
-                              </td>
-                              <td className="px-4 py-3 text-white font-medium">
-                                <span className="inline-flex items-center gap-2">
-                                  <span className="text-purple-300">🎓</span> {m.name}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-slate-300 text-xs">{pilots.join(', ') || '—'}</td>
-                              <td className="px-4 py-3 text-slate-300 text-center">{tFlights.length}</td>
-                              <td className="px-4 py-3 text-purple-300 font-medium whitespace-nowrap">{fmtHours(mins)}</td>
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                        <span className="text-purple-400">🎓</span> כל האימונים השנה
+                      </h2>
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <span>סך אימונים: <strong className="text-purple-300">{yearTrainings.length}</strong></span>
+                        <span>·</span>
+                        <span>סך שעות אימון: <strong className="text-purple-300">{fmtHours(totalMinutes)}</strong></span>
+                      </div>
+                    </div>
+                    {yearTrainings.length === 0 ? (
+                      <div className="text-center py-12 text-slate-500 text-sm">
+                        🎓 לא נרשמו אימונים השנה עדיין
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700/30 text-right">
+                              {['#', 'תאריך', 'כותרת / מהות', 'טייסים', 'טיסות', 'סה"כ שעות'].map(h => (
+                                <th key={h} className="px-4 py-3 text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
+                              ))}
                             </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700/30">
+                            {yearTrainings.map((g, i) => (
+                              <tr key={g.key} className="hover:bg-slate-700/20 transition-colors">
+                                <td className="px-4 py-3 text-slate-500 text-xs">{i + 1}</td>
+                                <td className="px-4 py-3 text-slate-300 text-xs whitespace-nowrap">
+                                  {new Date(g.date).toLocaleDateString('he-IL')}
+                                </td>
+                                <td className="px-4 py-3 text-white font-medium">
+                                  <span className="inline-flex items-center gap-2">
+                                    <span className="text-purple-300">🎓</span> {g.name}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-300 text-xs">{Array.from(g.pilots).join(', ') || '—'}</td>
+                                <td className="px-4 py-3 text-slate-300 text-center">{g.flights.length}</td>
+                                <td className="px-4 py-3 text-purple-300 font-medium whitespace-nowrap">{fmtHours(g.minutes)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 )
               })()}
             </div>
@@ -2939,7 +2968,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))).map(drone => {
                       const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
                       const totalMins = dFlights.reduce((a: number, f: Flight) => a + f.duration, 0)
-                      const trainingMins = dFlights.reduce((a: number, f: Flight) => a + (f.missionId && trainingMissionIdSet.has(f.missionId) ? f.duration : 0), 0)
+                      const trainingMins = dFlights.reduce((a: number, f: Flight) => a + (isFlightTraining(f) ? f.duration : 0), 0)
                       const operationalMins = totalMins - trainingMins
                       const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
                       const batteries = droneBatteries.filter(b => b.droneTailNumber === drone.tailNumber)

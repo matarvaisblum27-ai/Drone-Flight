@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, DroneBattery, Mission, Flight, isFlightComplete, missingFields } from '@/lib/types'
+import { FlightDB, DroneBattery, Mission, Flight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -463,8 +463,10 @@ export default function PilotDashboard() {
   useEffect(() => { if (authChecked) fetchBatteries() }, [authChecked, fetchBatteries])
   useEffect(() => { if (authChecked) fetchMissions() }, [authChecked, fetchMissions])
 
-  // Map of missionId → isTraining for fast lookup
-  const trainingMissionIds = new Set(allMissions.filter(m => m.isTraining).map(m => m.id))
+  // Map of missionId → isTraining (flag or name-match for legacy data)
+  const trainingMissionIds = new Set(
+    allMissions.filter(m => m.isTraining || isTrainingName(m.name)).map(m => m.id)
+  )
 
   // ── Hard auth gate — render NOTHING until session is confirmed ───────────
   if (!authChecked) {
@@ -532,7 +534,8 @@ export default function PilotDashboard() {
     }
 
     // ── Path B: creating a new mission (with fuzzy-match check) ──────────
-    if (existingNamesOnDate.length > 0 && !missionPick) {
+    // Training flights always create a new mission, so they skip the "pick existing" gate.
+    if (existingNamesOnDate.length > 0 && !missionPick && !missionForm.isTraining) {
       setMissionError('יש לבחור משימה קיימת או לבחור "צור משימה חדשה"')
       return
     }
@@ -882,7 +885,8 @@ export default function PilotDashboard() {
                 ? Array.from(new Set(db.flights.filter(f => f.date === missionForm.date && f.missionName).map(f => f.missionName)))
                 : []
               const showDropdown = missionForm.date && existingNamesOnDate.length > 0
-              const isCreatingNew = !showDropdown || missionPick === 'new'
+              // Training mode bypasses the existing-mission dropdown — always show the create-new fields.
+              const isCreatingNew = missionForm.isTraining || !showDropdown || missionPick === 'new'
               return (
               <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
                 <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
@@ -896,7 +900,8 @@ export default function PilotDashboard() {
                     <input type="date" value={missionForm.date}
                       onChange={e => {
                         setMissionForm(f => ({ ...f, date: e.target.value, name: '' }))
-                        setMissionPick('')
+                        // When training, always treat as "create new" so the gate doesn't block us.
+                        setMissionPick(missionForm.isTraining ? 'new' : '')
                       }}
                       className={inputCls} />
                   </div>
@@ -908,7 +913,11 @@ export default function PilotDashboard() {
                         onChange={e => {
                           const v = e.target.checked
                           setMissionForm(f => ({ ...f, isTraining: v, battalions: v ? [''] : f.battalions }))
-                          if (v) setMissionPick('new')
+                          // Toggling training:
+                          //   ON  → always create a fresh training mission (skip the existing-mission gate)
+                          //   OFF → reset the picker so the user can choose existing or new
+                          setMissionPick(v ? 'new' : '')
+                          setMissionError('')
                         }}
                         className="w-4 h-4 accent-purple-500" />
                       <span className="text-sm text-purple-200 font-medium">🎓 טיסת אימון</span>
@@ -1200,7 +1209,10 @@ export default function PilotDashboard() {
                 const monthBorder = ['border-l-blue-500', 'border-l-green-500', 'border-l-yellow-500'][monthIdx % 3]
                 const monthBadge  = ['bg-blue-900/40 text-blue-300 border-blue-700/40', 'bg-green-900/40 text-green-300 border-green-700/40', 'bg-yellow-900/40 text-yellow-300 border-yellow-700/40'][monthIdx % 3]
                 const monthName   = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'][monthIdx]
-                const isTrainingGroup = group.flights[0]?.missionId ? trainingMissionIds.has(group.flights[0].missionId) : false
+                const firstFlight = group.flights[0]
+                const isTrainingGroup =
+                  (firstFlight?.missionId && trainingMissionIds.has(firstFlight.missionId)) ||
+                  isTrainingName(group.missionName)
                 return (
                 <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${isTrainingGroup ? 'border-l-purple-500' : monthBorder} rounded-xl overflow-hidden`}>
                   {/* Mission header */}

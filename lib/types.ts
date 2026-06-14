@@ -41,6 +41,12 @@ export interface Flight {
 /** Max length for the free-text per-flight note. */
 export const FLIGHT_NOTE_MAX_LEN = 50
 
+/** True if a mission name reads like a training (legacy data has no is_training flag,
+ *  but uses names like "אימון הטסה" / "אימון חירום" / etc.). */
+export function isTrainingName(name: string): boolean {
+  return /אימון/.test(name || '')
+}
+
 export interface FlightDB {
   pilots: Pilot[]
   flights: Flight[]
