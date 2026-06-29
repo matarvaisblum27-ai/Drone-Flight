@@ -8,6 +8,15 @@ export const dynamic = 'force-dynamic'
 const ADMIN_NAME = 'אורן וייסבלום'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseModels(raw: any): string[] {
+  if (Array.isArray(raw)) return raw.filter(x => typeof x === 'string')
+  if (typeof raw === 'string' && raw.trim()) {
+    try { const v = JSON.parse(raw); if (Array.isArray(v)) return v.filter(x => typeof x === 'string') } catch {}
+  }
+  return []
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToPilot(row: any): Pilot {
   return {
     id: row.id,
@@ -15,13 +24,14 @@ function rowToPilot(row: any): Pilot {
     license: row.license,
     isAdmin: row.is_admin ?? false,
     qualificationOverride: row.qualification_override ?? null,
+    requiredDroneModels: parseModels(row.required_drone_models),
   }
 }
 
 export async function GET() {
   const { data, error } = await supabase
     .from('pilots')
-    .select('id, name, license, is_admin, qualification_override')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models')
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json((data ?? []).map(rowToPilot))
@@ -44,7 +54,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('pilots')
     .insert({ id: `p${Date.now()}`, name, license, password_hash, is_admin: false })
-    .select('id, name, license, is_admin, qualification_override')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models')
     .single()
 
   if (error) {
@@ -59,25 +69,39 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const body = await req.json()
 
-  // ── Qualification-override-only update path ─────────────────────────────
-  // The pilots-management traffic-light UI sends just { id, qualificationOverride }
-  // without name/license. Keep the existing required-fields path for full edits,
-  // but allow this minimal update without forcing the client to round-trip name/license.
+  // ── Partial update path (no name/license) ───────────────────────────────
+  // The pilots-management UI sends partial updates for the qualification
+  // light override and/or the per-pilot required drone-models list.
   if (
     body.id &&
-    body.qualificationOverride !== undefined &&
     body.name === undefined &&
-    body.license === undefined
+    body.license === undefined &&
+    (body.qualificationOverride !== undefined || body.requiredDroneModels !== undefined)
   ) {
-    const v = body.qualificationOverride
-    if (v !== null && !['green', 'orange', 'red'].includes(v)) {
-      return NextResponse.json({ error: 'invalid qualificationOverride' }, { status: 400 })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const partialUpdates: Record<string, any> = {}
+
+    if (body.qualificationOverride !== undefined) {
+      const v = body.qualificationOverride
+      if (v !== null && !['green', 'orange', 'red'].includes(v)) {
+        return NextResponse.json({ error: 'invalid qualificationOverride' }, { status: 400 })
+      }
+      partialUpdates.qualification_override = v
     }
+
+    if (body.requiredDroneModels !== undefined) {
+      if (!Array.isArray(body.requiredDroneModels) || !body.requiredDroneModels.every((x: unknown) => typeof x === 'string')) {
+        return NextResponse.json({ error: 'requiredDroneModels must be a string array' }, { status: 400 })
+      }
+      // Store as JSON for JSONB column
+      partialUpdates.required_drone_models = body.requiredDroneModels
+    }
+
     const { data, error } = await supabase
       .from('pilots')
-      .update({ qualification_override: v })
+      .update(partialUpdates)
       .eq('id', body.id)
-      .select('id, name, license, is_admin, qualification_override')
+      .select('id, name, license, is_admin, qualification_override, required_drone_models')
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(rowToPilot(data))
@@ -130,7 +154,7 @@ export async function PUT(req: NextRequest) {
     .from('pilots')
     .update(updates)
     .eq('id', body.id)
-    .select('id, name, license, is_admin, qualification_override')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models')
     .single()
   console.log('[PUT /api/pilots] Supabase result:', { data: data ? { name: data.name, is_admin: data.is_admin } : null, error: error?.message })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

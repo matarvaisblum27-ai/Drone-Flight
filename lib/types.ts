@@ -7,6 +7,8 @@ export interface Pilot {
   isAdmin?: boolean
   /** Manual override for the qualification traffic-light. null/undefined = auto-compute from flights. */
   qualificationOverride?: QualificationLight | null
+  /** Drone MODELS the pilot is required to be qualified on. Empty array = use the default list. */
+  requiredDroneModels?: string[]
 }
 
 export interface Mission {
