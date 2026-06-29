@@ -9,13 +9,19 @@ const ADMIN_NAME = 'אורן וייסבלום'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToPilot(row: any): Pilot {
-  return { id: row.id, name: row.name, license: row.license, isAdmin: row.is_admin ?? false }
+  return {
+    id: row.id,
+    name: row.name,
+    license: row.license,
+    isAdmin: row.is_admin ?? false,
+    qualificationOverride: row.qualification_override ?? null,
+  }
 }
 
 export async function GET() {
   const { data, error } = await supabase
     .from('pilots')
-    .select('id, name, license, is_admin')
+    .select('id, name, license, is_admin, qualification_override')
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json((data ?? []).map(rowToPilot))
@@ -38,7 +44,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('pilots')
     .insert({ id: `p${Date.now()}`, name, license, password_hash, is_admin: false })
-    .select('id, name, license, is_admin')
+    .select('id, name, license, is_admin, qualification_override')
     .single()
 
   if (error) {
@@ -52,6 +58,31 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const body = await req.json()
+
+  // ── Qualification-override-only update path ─────────────────────────────
+  // The pilots-management traffic-light UI sends just { id, qualificationOverride }
+  // without name/license. Keep the existing required-fields path for full edits,
+  // but allow this minimal update without forcing the client to round-trip name/license.
+  if (
+    body.id &&
+    body.qualificationOverride !== undefined &&
+    body.name === undefined &&
+    body.license === undefined
+  ) {
+    const v = body.qualificationOverride
+    if (v !== null && !['green', 'orange', 'red'].includes(v)) {
+      return NextResponse.json({ error: 'invalid qualificationOverride' }, { status: 400 })
+    }
+    const { data, error } = await supabase
+      .from('pilots')
+      .update({ qualification_override: v })
+      .eq('id', body.id)
+      .select('id, name, license, is_admin, qualification_override')
+      .single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json(rowToPilot(data))
+  }
+
   const name = body.name?.trim()
   const license = body.license?.trim()
   if (!body.id || !name || !license) {
@@ -99,7 +130,7 @@ export async function PUT(req: NextRequest) {
     .from('pilots')
     .update(updates)
     .eq('id', body.id)
-    .select('id, name, license, is_admin')
+    .select('id, name, license, is_admin, qualification_override')
     .single()
   console.log('[PUT /api/pilots] Supabase result:', { data: data ? { name: data.name, is_admin: data.is_admin } : null, error: error?.message })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

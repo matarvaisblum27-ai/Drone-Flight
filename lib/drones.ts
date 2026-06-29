@@ -7,7 +7,7 @@ export const DRONES: {
 }[] = [
   { model: 'מאביק 2',          tailNumber: '4x-pzk',   weightKg: 4,    serialNumber: '4gcck6qr0b0qn7' },
   { model: 'מאביק 3',          tailNumber: '4x-ulj',   weightKg: 4,    serialNumber: '1581f5fjc244q00dwzp2' },
-  { model: 'מאביק 3 גלילית',   tailNumber: '4x-ulp',   extraReg: '1003006', serialNumber: '1581f5fjc244h00dpft8' },
+  { model: 'מאביק 3 מאביק צהלי', tailNumber: '4x-ulp',   extraReg: '1003006', serialNumber: '1581f5fjc244h00dpft8' },
   { model: 'מאטריס 30',        tailNumber: '4x-nxj',   weightKg: 4,    serialNumber: '1581f5bkd239c00fgf60' },
   { model: 'מאטריס 30',        tailNumber: '4x-nyq',   weightKg: 4,    serialNumber: '1581f5bkx25bv00f0fe3' },
   { model: 'מאטריס 300',       tailNumber: '4x-yxb',   weightKg: 25,   serialNumber: '1znbjar00c00l' },

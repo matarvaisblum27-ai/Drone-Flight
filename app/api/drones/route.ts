@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 const INITIAL_DRONES = [
   { tail_number: '4x-pzk',  model_name: 'מאביק 2',        weight: '4',  serial_number: '4gcck6qr0b0qn7',        extra_registration: null },
   { tail_number: '4x-ulj',  model_name: 'מאביק 3',        weight: '4',  serial_number: '1581f5fjc244q00dwzp2',  extra_registration: null },
-  { tail_number: '4x-ulp',  model_name: 'מאביק 3 גלילית', weight: null, serial_number: '1581f5fjc244h00dpft8', extra_registration: '1003006' },
+  { tail_number: '4x-ulp',  model_name: 'מאביק 3 מאביק צהלי', weight: null, serial_number: '1581f5fjc244h00dpft8', extra_registration: '1003006' },
   { tail_number: '4x-nxj',  model_name: 'מאטריס 30',      weight: '4',  serial_number: '1581f5bkd239c00fgf60',  extra_registration: null },
   { tail_number: '4x-nyq',  model_name: 'מאטריס 30',      weight: '4',  serial_number: '1581f5bkx25bv00f0fe3',  extra_registration: null },
   { tail_number: '4x-yxb',  model_name: 'מאטריס 300',     weight: '25', serial_number: '1znbjar00c00l',         extra_registration: null },

@@ -1,8 +1,12 @@
+export type QualificationLight = 'green' | 'orange' | 'red'
+
 export interface Pilot {
   id: string
   name: string
   license: string
   isAdmin?: boolean
+  /** Manual override for the qualification traffic-light. null/undefined = auto-compute from flights. */
+  qualificationOverride?: QualificationLight | null
 }
 
 export interface Mission {
