@@ -56,9 +56,14 @@ export async function GET(req: NextRequest) {
 
   const [pilotsRes, flightsRes, migrated] = await Promise.all([
     supabase.from('pilots').select('id,name,license,is_admin').order('name'),
+    // NOTE: Supabase JS defaults to a 1000-row cap. Once the DB grew past that,
+    // the OLDEST 1000 flights were returned and every newly-logged flight
+    // was silently cut off. Explicit high limit + DESC order fixes it.
     supabase.from('flights')
       .select('id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion,police_logbook_entered,battery_count,note')
-      .order('date').order('start_time'),
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .limit(50000),
     hasMigration(),
   ])
 

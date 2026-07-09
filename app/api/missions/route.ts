@@ -38,7 +38,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date')
 
-  let query = supabase.from('missions').select('*').order('mission_number')
+  // Same 1000-row-cap gotcha as /api/flights — set an explicit high limit.
+  let query = supabase.from('missions').select('*').order('date', { ascending: false }).order('mission_number', { ascending: false }).limit(50000)
   if (date) query = query.eq('date', date)
 
   const { data, error } = await query
