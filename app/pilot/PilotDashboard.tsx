@@ -121,6 +121,18 @@ function TwoStepDeleteDialog({ onConfirm, onCancel }: {
   )
 }
 
+/** Normalise a person's name for comparison: collapse whitespace (incl. NBSP,
+ *  RTL marks), strip common punctuation, lowercase. Used so "בשיר  חמדאן" and
+ *  "בשיר חמדאן" resolve to the same pilot. */
+export function normName(s: string): string {
+  return (s ?? '')
+    .replace(/[‎‏‪-‮ ]/g, ' ')
+    .replace(/[.'"׳״`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
 function fmtHours(minutes: number) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
@@ -396,6 +408,8 @@ export default function PilotDashboard() {
   useInactivityLogout()
   const router = useRouter()
   const [userName, setUserName] = useState('')
+  // pilotId straight from the verified session — the authoritative identity.
+  const [userId, setUserId] = useState('')
   const [db, setDb] = useState<FlightDB | null>(null)
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
   const [allMissions, setAllMissions] = useState<Mission[]>([])
@@ -438,6 +452,7 @@ export default function PilotDashboard() {
       // True admin must use /admin
       if (s.isAdmin) { window.location.replace('/admin'); return }
       setUserName(s.name)
+      setUserId(s.pilotId ?? '')
       setAuthChecked(true)
     }).catch(() => { window.location.replace('/') })
   }, [])
@@ -485,9 +500,21 @@ export default function PilotDashboard() {
     )
   }
 
-  const pilot = db.pilots.find(p => p.name === userName)
+  // ── Identify the logged-in pilot ────────────────────────────────────────────
+  // Resolve by session pilotId first (authoritative); fall back to a normalised
+  // name match so a stray space / punctuation difference can't blank the page.
+  const pilot =
+    db.pilots.find(p => p.id === userId) ??
+    db.pilots.find(p => normName(p.name) === normName(userName))
+
+  // A flight belongs to me if EITHER the id or the name matches. Flights logged
+  // by the commander on a pilot's behalf sometimes carry the right pilot_name but
+  // a stale pilot_id — filtering on id alone hid those from the pilot even though
+  // the commander could see them in his own (name-based) history view.
   const myFlights = pilot
-    ? db.flights.filter(f => f.pilotId === pilot.id).sort((a, b) => b.date.localeCompare(a.date))
+    ? db.flights
+        .filter(f => f.pilotId === pilot.id || normName(f.pilotName) === normName(pilot.name))
+        .sort((a, b) => b.date.localeCompare(a.date))
     : []
 
   const totalMinutes = myFlights.reduce((a, f) => a + f.duration, 0)

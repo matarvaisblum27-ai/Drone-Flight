@@ -22,7 +22,10 @@ export async function GET(req: NextRequest) {
   const isAdmin = pilot.name === ADMIN_NAME
   const isViewer = !isAdmin && pilot.is_admin === true
 
-  const res = NextResponse.json({ valid: true, isAdmin, isViewer, name: pilot.name })
+  // pilotId is returned so the client can resolve the pilot by ID rather than by
+  // name. Name matching broke for pilots whose DB name differs from the session
+  // name by whitespace/spelling, leaving their flight list empty.
+  const res = NextResponse.json({ valid: true, pilotId: session.pilotId, isAdmin, isViewer, name: pilot.name })
   res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
   return res
 }

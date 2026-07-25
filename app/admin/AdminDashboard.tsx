@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, QualificationLight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
@@ -909,7 +909,23 @@ export default function AdminDashboard() {
   useInactivityLogout()
   const router = useRouter()
   const [db, setDb] = useState<FlightDB | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'ranking' | 'add' | 'history' | 'trainings' | 'pilots' | 'batteries' | 'drones' | 'logs'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'control' | 'ranking' | 'add' | 'history' | 'trainings' | 'pilots' | 'batteries' | 'drones' | 'logs'>('overview')
+  // ── Monthly control tab state ──────────────────────────────────────────────
+  const [ctrlMonth, setCtrlMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  /** Minimum flights per required drone model, per month, for a pilot to be "green". */
+  const [ctrlThreshold, setCtrlThreshold] = useState(2)
+  const [expandedCtrlPilot, setExpandedCtrlPilot] = useState<string | null>(null)
+  const [ctrlOnlyGaps, setCtrlOnlyGaps] = useState(false)
+
+  // Threshold is a personal preference of whoever is watching — keep it on the device.
+  useEffect(() => {
+    const saved = Number(localStorage.getItem('ctrlThreshold'))
+    if (saved >= 1 && saved <= 20) setCtrlThreshold(saved)
+  }, [])
+  useEffect(() => { localStorage.setItem('ctrlThreshold', String(ctrlThreshold)) }, [ctrlThreshold])
   const [addForm, setAddForm] = useState({
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
@@ -945,6 +961,7 @@ export default function AdminDashboard() {
   const [confirmBatteryId, setConfirmBatteryId] = useState<string | null>(null)
   const [gasDrops, setGasDrops] = useState<GasDrop[]>([])
   const [gasDropMigrating, setGasDropMigrating] = useState(false)
+  const [relinking, setRelinking] = useState(false)
   const [currentUserName, setCurrentUserName] = useState<string>('')
   const [isViewer, setIsViewer] = useState(false)
   const [loginLogs, setLoginLogs] = useState<Array<{ id: number; pilot_name: string; success: boolean; ip_address: string; created_at: string }>>([])
@@ -1295,6 +1312,112 @@ export default function AdminDashboard() {
       if (!cur || f.date > cur) pilotLastMonthFlewModel[f.pilotId][model] = f.date
     }
   })
+  // ── Monthly control ("בקרה חודשית") ─────────────────────────────────────────
+  // Answers the question: for each pilot, how many flights did he do on each
+  // drone this month vs last month, and is that above the required minimum?
+  const shiftMonth = (ym: string, delta: number): string => {
+    const [y, m] = ym.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
+  const monthLabel = (ym: string): string => {
+    const [y, m] = ym.split('-').map(Number)
+    return `${HEBREW_MONTH_NAMES[m - 1]} ${y}`
+  }
+  /** pilotId → model → { flights, minutes, lastDate } for a given YYYY-MM. */
+  type ModelStat = { flights: number; minutes: number; lastDate: string }
+  const statsForMonth = (ym: string): Record<string, Record<string, ModelStat>> => {
+    const out: Record<string, Record<string, ModelStat>> = {}
+    db.pilots.forEach(p => { out[p.id] = {} })
+    db.flights.forEach(f => {
+      if (!f.date.startsWith(ym)) return
+      const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+      if (!model || !out[f.pilotId]) return
+      const cur = out[f.pilotId][model] ?? { flights: 0, minutes: 0, lastDate: '' }
+      cur.flights += 1
+      cur.minutes += f.duration
+      if (f.date > cur.lastDate) cur.lastDate = f.date
+      out[f.pilotId][model] = cur
+    })
+    return out
+  }
+  const ctrlPrevMonth = shiftMonth(ctrlMonth, -1)
+  const ctrlCur  = statsForMonth(ctrlMonth)
+  const ctrlPrev = statsForMonth(ctrlPrevMonth)
+
+  /** Required models for a pilot — the per-pilot list if configured, else all. */
+  const requiredModelsFor = (p: Pilot): string[] =>
+    (p.requiredDroneModels && p.requiredDroneModels.length > 0) ? p.requiredDroneModels : MATRIX_MODELS
+
+  interface ControlRow {
+    pilot: Pilot
+    required: string[]
+    /** Models that reached the threshold this month. */
+    met: string[]
+    /** Models below the threshold: how many flights are still missing. */
+    gaps: { model: string; done: number; missing: number }[]
+    light: QualificationLight
+    curFlights: number
+    prevFlights: number
+    curMinutes: number
+    prevMinutes: number
+  }
+  const controlRows: ControlRow[] = db.pilots.map(p => {
+    const required = requiredModelsFor(p)
+    const cur = ctrlCur[p.id] ?? {}
+    const prev = ctrlPrev[p.id] ?? {}
+    const met: string[] = []
+    const gaps: { model: string; done: number; missing: number }[] = []
+    required.forEach(m => {
+      const done = cur[m]?.flights ?? 0
+      if (done >= ctrlThreshold) met.push(m)
+      else gaps.push({ model: m, done, missing: ctrlThreshold - done })
+    })
+    const sum = (rec: Record<string, ModelStat>, key: 'flights' | 'minutes') =>
+      Object.values(rec).reduce((a, s) => a + s[key], 0)
+    const light: QualificationLight =
+      met.length === 0 ? 'red' : (met.length === required.length ? 'green' : 'orange')
+    return {
+      pilot: p, required, met, gaps, light,
+      curFlights: sum(cur, 'flights'),   prevFlights: sum(prev, 'flights'),
+      curMinutes: sum(cur, 'minutes'),   prevMinutes: sum(prev, 'minutes'),
+    }
+  }).sort((a, b) => {
+    const rank = { red: 0, orange: 1, green: 2 } as const
+    return rank[a.light] - rank[b.light] || a.pilot.name.localeCompare(b.pilot.name)
+  })
+  const ctrlVisibleRows = ctrlOnlyGaps ? controlRows.filter(r => r.light !== 'green') : controlRows
+  const ctrlCounts = {
+    green:  controlRows.filter(r => r.light === 'green').length,
+    orange: controlRows.filter(r => r.light === 'orange').length,
+    red:    controlRows.filter(r => r.light === 'red').length,
+  }
+
+  /** CSV export of the monthly control table (opens fine in Excel, RTL-safe BOM). */
+  const downloadControlCsv = () => {
+    const models = MATRIX_MODELS
+    const head = ['טייס', 'רמזור', 'נדרשים', 'עמד ב', ...models.flatMap(m => [`${m} — החודש`, `${m} — קודם`]), 'סה"כ טיסות החודש', 'סה"כ טיסות חודש קודם', 'שינוי']
+    const lightHe = { green: 'ירוק', orange: 'צהוב', red: 'אדום' } as const
+    const rows = controlRows.map(r => {
+      const cur = ctrlCur[r.pilot.id] ?? {}
+      const prev = ctrlPrev[r.pilot.id] ?? {}
+      return [
+        r.pilot.name, lightHe[r.light], r.required.length, r.met.length,
+        ...models.flatMap(m => [cur[m]?.flights ?? 0, prev[m]?.flights ?? 0]),
+        r.curFlights, r.prevFlights, r.curFlights - r.prevFlights,
+      ]
+    })
+    const csv = [head, ...rows]
+      .map(cols => cols.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `בקרה-חודשית-${ctrlMonth}.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
   const maxDroneMins = Math.max(...DRONES.map(d => droneTotalMins[d.tailNumber] ?? 0), 1)
   const dronesForSelect: DroneInfo[] = droneDetails.length > 0
     ? droneDetails
@@ -1526,6 +1649,32 @@ export default function AdminDashboard() {
       alert(`עדכון גדודים:\n✅ ${updated} טיסות עודכנו\n❌ ${errors} שגיאות`)
     }
     fetchDB()
+  }
+
+  /** Re-link flights whose pilot_id drifted away from pilot_name. Runs a dry-run
+   *  first and asks for confirmation before touching anything. */
+  const handleRelinkPilotIds = async () => {
+    setRelinking(true)
+    try {
+      const dry = await fetch('/api/admin/relink-pilot-ids')
+      if (!dry.ok) { alert('שגיאה בבדיקת שיוך הטיסות'); return }
+      const info = await dry.json()
+      if (!info.wouldFix) {
+        alert(`נסרקו ${info.scanned} טיסות.\n✅ כל הטיסות משויכות נכון — אין מה לתקן.`)
+        return
+      }
+      const detail = Object.entries(info.perPilot as Record<string, number>)
+        .map(([name, n]) => `• ${name}: ${n} טיסות`).join('\n')
+      if (!confirm(`נמצאו ${info.wouldFix} טיסות ששויכו למזהה טייס שגוי:\n\n${detail}\n\nלתקן את השיוך?`)) return
+
+      const res = await fetch('/api/admin/relink-pilot-ids', { method: 'POST' })
+      if (!res.ok) { alert('שגיאה בתיקון השיוך'); return }
+      const out = await res.json()
+      alert(`תיקון שיוך טיסות:\n✅ ${out.updated} טיסות תוקנו\n❌ ${out.errors} שגיאות`)
+      fetchDB()
+    } finally {
+      setRelinking(false)
+    }
   }
 
   const sortedHistory = [...db.flights].sort((a, b) => b.date.localeCompare(a.date))
@@ -2087,6 +2236,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         <div className="flex gap-1 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1 overflow-x-auto">
           {([
             { key: 'overview',   label: 'סקירה',          icon: '📊', minLevel: 'viewer'  },
+            { key: 'control',    label: 'בקרה חודשית',     icon: '🚦', minLevel: 'viewer'  },
             { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', minLevel: 'viewer'  },
             { key: 'add',        label: 'הוספת טיסה',      icon: '➕', minLevel: 'deputy'  },
             { key: 'history',    label: 'היסטוריה',        icon: '📜', minLevel: 'viewer'  },
@@ -2126,6 +2276,15 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 >
                   {battalionMigrating ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🎖️'}
                   עדכן שמות גדודים
+                </button>
+                <button
+                  onClick={handleRelinkPilotIds}
+                  disabled={relinking}
+                  title="בודק אם יש טיסות ששויכו למזהה טייס שגוי — ולכן לא מופיעות אצל הטייס עצמו"
+                  className="flex items-center gap-2 bg-sky-700/80 hover:bg-sky-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-all border border-sky-600/50 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {relinking ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '🔗'}
+                  תקן שיוך טיסות לטייסים
                 </button>
                 <button
                   onClick={() => downloadGeneralExcel(db.flights, db.pilots, gasDrops)}
@@ -2436,6 +2595,182 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         })}
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MONTHLY CONTROL — כמה הטיס כל מטיס כל כלי, החודש מול חודש קודם */}
+        {activeTab === 'control' && (
+          <div className="space-y-5">
+            {/* Controls */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <span className="text-emerald-400">🚦</span> בקרה חודשית — {monthLabel(ctrlMonth)}
+                </h2>
+                <button
+                  onClick={downloadControlCsv}
+                  className="flex items-center gap-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition-all border border-emerald-600/50"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  ייצוא לאקסל
+                </button>
+              </div>
+
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">חודש הבקרה</label>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setCtrlMonth(shiftMonth(ctrlMonth, -1))}
+                      className="px-2.5 py-2 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-white text-sm">‹</button>
+                    <input type="month" value={ctrlMonth} onChange={e => e.target.value && setCtrlMonth(e.target.value)}
+                      className="bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <button onClick={() => setCtrlMonth(shiftMonth(ctrlMonth, 1))}
+                      className="px-2.5 py-2 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-white text-sm">›</button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">מינימום טיסות בחודש לכל כלי</label>
+                  <select value={ctrlThreshold} onChange={e => setCtrlThreshold(Number(e.target.value))}
+                    className="bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {[1,2,3,4,5,6,8,10].map(n => <option key={n} value={n}>{n} טיסות</option>)}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer py-2">
+                  <input type="checkbox" checked={ctrlOnlyGaps} onChange={e => setCtrlOnlyGaps(e.target.checked)}
+                    className="w-4 h-4 rounded accent-blue-500" />
+                  הצג רק מטיסים עם פערים
+                </label>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                הרמזור נקבע לפי הכלים הנדרשים לכל מטיס (נקבעים בלשונית «ניהול טייסים»).
+                <span className="text-green-400"> ירוק</span> = עמד במינימום בכל הכלים הנדרשים ·
+                <span className="text-orange-400"> צהוב</span> = עמד בחלק ·
+                <span className="text-red-400"> אדום</span> = לא עמד באף כלי.
+                המספר בסוגריים הוא {monthLabel(ctrlPrevMonth)}.
+              </p>
+            </div>
+
+            {/* KPI cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { key: 'green',  label: 'תקינים',      n: ctrlCounts.green,  cls: 'from-green-900/40 border-green-700/40 text-green-400' },
+                { key: 'orange', label: 'פערים חלקיים', n: ctrlCounts.orange, cls: 'from-orange-900/40 border-orange-700/40 text-orange-400' },
+                { key: 'red',    label: 'ללא עמידה',    n: ctrlCounts.red,    cls: 'from-red-900/40 border-red-700/40 text-red-400' },
+              ] as const).map(c => (
+                <div key={c.key} className={`bg-gradient-to-b ${c.cls} to-slate-800/60 border rounded-xl p-4 text-center`}>
+                  <p className="text-3xl font-bold">{c.n}</p>
+                  <p className="text-xs text-slate-400 mt-1">{c.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Matrix */}
+            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-900/50">
+                    <tr>
+                      <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-300 sticky right-0 bg-slate-900/80 z-10">מטיס</th>
+                      {MATRIX_MODELS.map(m => (
+                        <th key={m} className="px-2 py-2.5 text-center text-[11px] font-medium text-slate-300 whitespace-nowrap">{m}</th>
+                      ))}
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-slate-300 whitespace-nowrap border-r border-slate-700/50">סה&quot;כ החודש</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-slate-300 whitespace-nowrap">מגמה</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/40">
+                    {ctrlVisibleRows.length === 0 && (
+                      <tr><td colSpan={MATRIX_MODELS.length + 3} className="py-10 text-center text-slate-500 text-sm">
+                        אין מטיסים להצגה 🎉
+                      </td></tr>
+                    )}
+                    {ctrlVisibleRows.map(row => {
+                      const cur = ctrlCur[row.pilot.id] ?? {}
+                      const prev = ctrlPrev[row.pilot.id] ?? {}
+                      const dot = row.light === 'green' ? 'bg-green-500 ring-green-500/40'
+                        : row.light === 'orange' ? 'bg-orange-500 ring-orange-500/40' : 'bg-red-500 ring-red-500/40'
+                      const delta = row.curFlights - row.prevFlights
+                      const isOpen = expandedCtrlPilot === row.pilot.id
+                      return (
+                        <Fragment key={row.pilot.id}>
+                          <tr
+                            onClick={() => setExpandedCtrlPilot(isOpen ? null : row.pilot.id)}
+                            className="hover:bg-slate-700/20 transition-colors cursor-pointer">
+                            <td className="px-3 py-2.5 sticky right-0 bg-slate-800/95 z-10">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-3 h-3 rounded-full ring-2 flex-shrink-0 ${dot}`} />
+                                <div className="min-w-0">
+                                  <p className="text-white font-medium truncate">{row.pilot.name}</p>
+                                  <p className="text-[10px] text-slate-500">עמד ב־{row.met.length}/{row.required.length} כלים</p>
+                                </div>
+                              </div>
+                            </td>
+                            {MATRIX_MODELS.map(m => {
+                              const isRequired = row.required.includes(m)
+                              const c = cur[m]?.flights ?? 0
+                              const p = prev[m]?.flights ?? 0
+                              const cls = !isRequired
+                                ? 'text-slate-600'
+                                : c >= ctrlThreshold ? 'text-green-400'
+                                : c > 0 ? 'text-orange-400' : 'text-red-400'
+                              return (
+                                <td key={m} className="px-2 py-2.5 text-center whitespace-nowrap">
+                                  <span className={`font-bold ${cls}`}>{c}</span>
+                                  <span className="text-[10px] text-slate-500 mr-1">({p})</span>
+                                  {!isRequired && <span className="block text-[9px] text-slate-600">לא נדרש</span>}
+                                </td>
+                              )
+                            })}
+                            <td className="px-3 py-2.5 text-center border-r border-slate-700/50">
+                              <span className="text-white font-bold">{row.curFlights}</span>
+                              <span className="text-[10px] text-slate-500 mr-1">({row.prevFlights})</span>
+                              <span className="block text-[10px] text-slate-500">{fmtHours(row.curMinutes)}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                              <span className={`text-xs font-semibold ${delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-slate-500'}`}>
+                                {delta > 0 ? `▲ ${delta}+` : delta < 0 ? `▼ ${delta}` : '— 0'}
+                              </span>
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-slate-900/40">
+                              <td colSpan={MATRIX_MODELS.length + 3} className="px-4 py-3">
+                                {row.gaps.length === 0 ? (
+                                  <p className="text-sm text-green-400">✅ עמד בדרישה בכל {row.required.length} הכלים הנדרשים החודש.</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    <p className="text-xs font-medium text-slate-300">פערים ב־{monthLabel(ctrlMonth)}:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {row.gaps.map(g => (
+                                        <span key={g.model}
+                                          className="text-[11px] bg-slate-800 border border-slate-700/60 rounded-lg px-2.5 py-1.5 text-slate-300">
+                                          <span className="text-white font-medium">{g.model}</span>
+                                          {' — '}
+                                          <span className={g.done === 0 ? 'text-red-400' : 'text-orange-400'}>
+                                            בוצעו {g.done} מתוך {ctrlThreshold}
+                                          </span>
+                                          {' · '}חסרות {g.missing}
+                                          {(cur[g.model]?.lastDate || prev[g.model]?.lastDate) && (
+                                            <span className="text-slate-500">
+                                              {' · '}אחרונה: {new Date((cur[g.model]?.lastDate || prev[g.model]!.lastDate)).toLocaleDateString('he-IL')}
+                                            </span>
+                                          )}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
