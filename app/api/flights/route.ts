@@ -43,6 +43,43 @@ function rowToFlight(row: any): Flight {
   }
 }
 
+const FLIGHT_COLUMNS =
+  'id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion,police_logbook_entered,battery_count,note'
+
+/**
+ * Fetch EVERY flight, in pages.
+ *
+ * Supabase/PostgREST enforces a server-side `max-rows` cap (1000 by default)
+ * that a client-side `.limit(50000)` CANNOT override — the server silently
+ * truncates the response. Because we order newest-first, that quietly dropped
+ * all older flights: recent months looked full, older months looked empty, and
+ * the monthly control screen showed months with zero activity that never
+ * happened. Paging in chunks of 1000 stays under the cap and returns everything.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchAllFlights(): Promise<{ data: any[]; error: { message: string } | null }> {
+  const PAGE = 1000
+  const MAX_ROWS = 200_000 // hard safety stop
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const all: any[] = []
+
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data, error } = await supabase
+      .from('flights')
+      .select(FLIGHT_COLUMNS)
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .range(from, from + PAGE - 1)
+
+    if (error) return { data: [], error }
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < PAGE) break // last page
+  }
+
+  return { data: all, error: null }
+}
+
 async function hasMigration(): Promise<boolean> {
   if (_migrated !== null) return _migrated
   const { error } = await supabase.from('flights').select('observer').limit(1)
@@ -56,14 +93,7 @@ export async function GET(req: NextRequest) {
 
   const [pilotsRes, flightsRes, migrated] = await Promise.all([
     supabase.from('pilots').select('id,name,license,is_admin').order('name'),
-    // NOTE: Supabase JS defaults to a 1000-row cap. Once the DB grew past that,
-    // the OLDEST 1000 flights were returned and every newly-logged flight
-    // was silently cut off. Explicit high limit + DESC order fixes it.
-    supabase.from('flights')
-      .select('id,pilot_id,pilot_name,date,mission_name,mission_id,tail_number,battery,start_time,end_time,duration,observer,gas_dropped,gas_drop_time,battalion,police_logbook_entered,battery_count,note')
-      .order('date', { ascending: false })
-      .order('start_time', { ascending: false })
-      .limit(50000),
+    fetchAllFlights(),
     hasMigration(),
   ])
 

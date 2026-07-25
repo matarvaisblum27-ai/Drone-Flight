@@ -38,13 +38,25 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date')
 
-  // Same 1000-row-cap gotcha as /api/flights — set an explicit high limit.
-  let query = supabase.from('missions').select('*').order('date', { ascending: false }).order('mission_number', { ascending: false }).limit(50000)
-  if (date) query = query.eq('date', date)
+  // Same server-side max-rows cap as /api/flights: `.limit()` can't beat it, so
+  // page through in chunks of 1000 until the table is exhausted.
+  const PAGE = 1000
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const all: any[] = []
+  for (let from = 0; from < 200_000; from += PAGE) {
+    let query = supabase.from('missions').select('*')
+      .order('date', { ascending: false })
+      .order('mission_number', { ascending: false })
+      .range(from, from + PAGE - 1)
+    if (date) query = query.eq('date', date)
 
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json((data ?? []).map(rowToMission))
+    const { data, error } = await query
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < PAGE) break
+  }
+  return NextResponse.json(all.map(rowToMission))
 }
 
 export async function POST(req: NextRequest) {
