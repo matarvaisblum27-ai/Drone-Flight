@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { FlightDB, DroneBattery, Mission, Flight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
+import { FlightDB, DroneBattery, DroneInfo, Mission, Flight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -154,9 +154,10 @@ function calcDuration(start: string, end: string): number {
 // whether the flight was entered in the police logbook. Mission-level fields
 // (date, mission name, observer, battalion) are NOT editable here — those are
 // shared across all flights in the mission and should be changed by the admin.
-function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
+function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
   flight: Flight
   batteries: DroneBattery[]
+  drones: { tailNumber: string; model: string }[]
   onSave: (updated: {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
@@ -235,7 +236,7 @@ function PilotFlightEditModal({ flight, batteries, onSave, onCancel }: {
                 return { ...f, tailNumber: newTail, battery: keepBattery ? f.battery : '' }
               })}
               className={inputCls}>
-              {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
+              {(drones.length > 0 ? drones : DRONES).map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
             </select>
           </div>
           <div>
@@ -413,6 +414,10 @@ export default function PilotDashboard() {
   const [db, setDb] = useState<FlightDB | null>(null)
   const [droneBatteries, setDroneBatteries] = useState<DroneBattery[]>([])
   const [allMissions, setAllMissions] = useState<Mission[]>([])
+  // Live drones list from the DB — the admin adds/renames drones there and we
+  // must reflect that on the pilot's dropdown (was previously hard-coded and
+  // missed any drone added after deploy, e.g. 1007014).
+  const [allDrones, setAllDrones] = useState<DroneInfo[]>([])
   const [activeTab, setActiveTab] = useState<'stats' | 'add' | 'history'>('stats')
 
   // ── Mission step (step 1) ─────────────────────────────────────────────────
@@ -473,10 +478,26 @@ export default function PilotDashboard() {
     if (res.ok) setAllMissions(await res.json())
   }, [])
 
+  const fetchDrones = useCallback(async () => {
+    const res = await fetch('/api/drones', { cache: 'no-store' })
+    if (res.ok) setAllDrones(await res.json())
+  }, [])
+
   // Only fetch data after auth is confirmed
   useEffect(() => { if (authChecked) fetchDB() }, [authChecked, fetchDB])
   useEffect(() => { if (authChecked) fetchBatteries() }, [authChecked, fetchBatteries])
   useEffect(() => { if (authChecked) fetchMissions() }, [authChecked, fetchMissions])
+  useEffect(() => { if (authChecked) fetchDrones() }, [authChecked, fetchDrones])
+
+  // Prefer the live DB list; fall back to the hard-coded list on first render
+  // (before the fetch resolves) or if the API is temporarily unavailable.
+  const availableDrones: { tailNumber: string; model: string }[] = allDrones.length > 0
+    ? allDrones.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
+    : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
+  const droneLabelDynamic = (tail: string): string => {
+    const d = availableDrones.find(x => x.tailNumber === tail)
+    return d ? `${d.model} | ${tail}` : droneLabel(tail)
+  }
 
   // Map of missionId → isTraining (flag or name-match for legacy data)
   const trainingMissionIds = new Set(
@@ -733,6 +754,7 @@ export default function PilotDashboard() {
         <PilotFlightEditModal
           flight={editFlight}
           batteries={droneBatteries}
+          drones={availableDrones}
           onSave={handleEditSave}
           onCancel={() => setEditFlight(null)}
         />
@@ -855,7 +877,7 @@ export default function PilotDashboard() {
                       <div>
                         <p className="text-sm font-medium text-white">{f.missionName || '—'}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabel(f.tailNumber)}{f.battery ? ` · סוללה ${f.battery}` : ''}{f.observer.length > 0 ? ` · 👁 ${f.observer.join(', ')}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}</span> : ''}
+                          {new Date(f.date).toLocaleDateString('he-IL')} · {droneLabelDynamic(f.tailNumber)}{f.battery ? ` · סוללה ${f.battery}` : ''}{f.observer.length > 0 ? ` · 👁 ${f.observer.join(', ')}` : ''}{f.gasDropped ? <span className="text-amber-400 font-medium"> · 💧 הטלת גז{f.eventNumber ? ` ${f.eventNumber}` : ''}</span> : ''}
                         </p>
                       </div>
                       <div className="text-left flex-shrink-0">
@@ -1086,7 +1108,7 @@ export default function PilotDashboard() {
                     <select value={flightForm.tailNumber}
                       onChange={e => setFlightForm(f => ({ ...f, tailNumber: e.target.value, battery: '' }))}
                       className={inputCls}>
-                      {DRONES.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
+                      {availableDrones.map(d => <option key={d.tailNumber} value={d.tailNumber}>{d.model} | {d.tailNumber}</option>)}
                     </select>
                   </div>
                   <div>
@@ -1276,7 +1298,7 @@ export default function PilotDashboard() {
                               )}
                             </div>
                             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
-                              <span>✈️ {droneLabel(f.tailNumber)}</span>
+                              <span>✈️ {droneLabelDynamic(f.tailNumber)}</span>
                               {f.battery && <span>🔋 {f.battery}</span>}
                               {f.batteryCount > 1 && (
                                 <span className="inline-flex items-center gap-1 bg-blue-900/30 border border-blue-700/50 text-blue-300 font-medium px-2 py-0.5 rounded-md">
