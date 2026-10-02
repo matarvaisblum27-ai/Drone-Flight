@@ -23,6 +23,28 @@ function toMatrixModel(model: string): string | null {
 const TAIL_TO_MATRIX_MODEL: Record<string, string> = {}
 DRONES.forEach(d => { const m = toMatrixModel(d.model); if (m) TAIL_TO_MATRIX_MODEL[d.tailNumber] = m })
 
+/**
+ * Collapse a saved required-models list onto the canonical MATRIX_MODELS names.
+ *
+ * The qualification editor used to offer raw fleet model names ("אווטה 2",
+ * "מאביק 3 מאביק צהלי") while flight counting keys off the short canonical
+ * names ("אווטה", "מאביק 3"). The two never matched, so those drones were
+ * permanently reported as never-flown no matter how many flights existed.
+ * Normalising on read repairs the rows already saved in the DB — no migration
+ * needed. Anything unrecognised is dropped rather than silently kept broken.
+ */
+function normalizeRequiredModels(list: string[] | undefined | null): string[] {
+  if (!list || list.length === 0) return []
+  const out = new Set<string>()
+  list.forEach(raw => {
+    if (MATRIX_MODELS.includes(raw)) { out.add(raw); return }
+    const canonical = toMatrixModel(raw)
+    if (canonical) out.add(canonical)
+  })
+  // Keep MATRIX_MODELS ordering so the UI reads consistently everywhere.
+  return MATRIX_MODELS.filter(m => out.has(m))
+}
+
 function fmtHours(minutes: number) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
@@ -543,7 +565,9 @@ function QualificationEditorModal({ pilot, allDroneModels, flownModels, onSave, 
   onSave: (required: string[], override: QualificationLight | null) => void
   onCancel: () => void
 }) {
-  const initialRequired = pilot.requiredDroneModels ?? []
+  // Normalise on open so legacy rows saved with raw fleet names ("אווטה 2")
+  // show up pre-ticked against the canonical option ("אווטה").
+  const initialRequired = normalizeRequiredModels(pilot.requiredDroneModels)
   const [required, setRequired] = useState<string[]>(initialRequired)
   const [override, setOverride] = useState<QualificationLight | null>(pilot.qualificationOverride ?? null)
 
@@ -1285,12 +1309,29 @@ export default function AdminDashboard() {
   const droneTotalMins: Record<string, number> = {}
   db.flights.forEach(f => { droneTotalMins[f.tailNumber] = (droneTotalMins[f.tailNumber] || 0) + f.duration })
 
+  // ── Tail number → canonical model, built from the LIVE fleet ───────────────
+  // lib/drones.ts is a hardcoded snapshot of the fleet. Any drone added through
+  // the "ניהול רחפנים" screen afterwards (e.g. Matrice 30, tail 1007014) is
+  // missing from it, so its flights mapped to no model and were silently
+  // dropped from the qualification matrix AND the monthly control. Merging the
+  // DB fleet over the static list makes new drones count automatically.
+  const tailToModel: Record<string, string> = { ...TAIL_TO_MATRIX_MODEL }
+  droneDetails.forEach(d => {
+    const m = toMatrixModel(d.model)
+    if (m) tailToModel[d.tailNumber] = m
+  })
+
+  // Flights whose drone can't be resolved to a model — surfaced in the UI so
+  // this can never silently under-report again.
+  const unmappedFlights = db.flights.filter(f => !tailToModel[f.tailNumber])
+  const unmappedTails = Array.from(new Set(unmappedFlights.map(f => f.tailNumber || '(ריק)')))
+
   // Pilot training matrix
   const pilotEverFlew: Record<string, Set<string>> = {}
   const pilotMonthlyFlew: Record<string, Set<string>> = {}
   db.pilots.forEach(p => { pilotEverFlew[p.id] = new Set(); pilotMonthlyFlew[p.id] = new Set() })
   db.flights.forEach(f => {
-    const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+    const model = tailToModel[f.tailNumber]
     if (!model) return
     if (pilotEverFlew[f.pilotId]) pilotEverFlew[f.pilotId].add(model)
     if (f.date.startsWith(thisMonth) && pilotMonthlyFlew[f.pilotId]) pilotMonthlyFlew[f.pilotId].add(model)
@@ -1301,7 +1342,7 @@ export default function AdminDashboard() {
   const pilotLastMonthFlewModel: Record<string, Record<string, string>> = {}
   db.pilots.forEach(p => { pilotLastFlewModel[p.id] = {}; pilotLastMonthFlewModel[p.id] = {} })
   db.flights.forEach(f => {
-    const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+    const model = tailToModel[f.tailNumber]
     if (!model) return
     if (pilotLastFlewModel[f.pilotId]) {
       const cur = pilotLastFlewModel[f.pilotId][model]
@@ -1331,7 +1372,7 @@ export default function AdminDashboard() {
     db.pilots.forEach(p => { out[p.id] = {} })
     db.flights.forEach(f => {
       if (!f.date.startsWith(ym)) return
-      const model = TAIL_TO_MATRIX_MODEL[f.tailNumber]
+      const model = tailToModel[f.tailNumber]
       if (!model || !out[f.pilotId]) return
       const cur = out[f.pilotId][model] ?? { flights: 0, minutes: 0, lastDate: '' }
       cur.flights += 1
@@ -1346,8 +1387,10 @@ export default function AdminDashboard() {
   const ctrlPrev = statsForMonth(ctrlPrevMonth)
 
   /** Required models for a pilot — the per-pilot list if configured, else all. */
-  const requiredModelsFor = (p: Pilot): string[] =>
-    (p.requiredDroneModels && p.requiredDroneModels.length > 0) ? p.requiredDroneModels : MATRIX_MODELS
+  const requiredModelsFor = (p: Pilot): string[] => {
+    const configured = normalizeRequiredModels(p.requiredDroneModels)
+    return configured.length > 0 ? configured : MATRIX_MODELS
+  }
 
   interface ControlRow {
     pilot: Pilot
@@ -1760,7 +1803,20 @@ export default function AdminDashboard() {
       {qualEditorPilot && (
         <QualificationEditorModal
           pilot={qualEditorPilot}
-          allDroneModels={Array.from(new Set([...DRONES.map(d => d.model), ...(droneDetails.map(d => d.model))]))}
+          // Models of drones that currently exist in the DB fleet. Must be the
+          // canonical MATRIX_MODELS names so pilotEverFlew lookups match. When
+          // an admin deletes the last drone of a given model from the "ניהול
+          // רחפנים" screen, that model disappears from this picker on the next
+          // render. Fall back to MATRIX_MODELS on the first render before
+          // droneDetails has loaded, so the modal is never empty.
+          allDroneModels={(() => {
+            const live = Array.from(new Set(
+              droneDetails
+                .map(d => toMatrixModel(d.model))
+                .filter((m): m is string => m !== null)
+            ))
+            return live.length > 0 ? live : MATRIX_MODELS
+          })()}
           flownModels={pilotEverFlew[qualEditorPilot.id] ?? new Set()}
           onSave={async (required, override) => {
             // Optimistic update
@@ -2655,6 +2711,18 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </p>
             </div>
 
+            {unmappedFlights.length > 0 && (
+              <div className="bg-amber-900/25 border border-amber-700/50 rounded-xl p-4">
+                <p className="text-sm text-amber-300 font-medium">
+                  ⚠️ {unmappedFlights.length} טיסות אינן נספרות בבקרה
+                </p>
+                <p className="text-xs text-amber-200/70 mt-1 leading-relaxed">
+                  הן רשומות על מספרי זנב שלא משויכים לדגם מוכר: <span className="font-mono">{unmappedTails.join(', ')}</span>.
+                  תקן את הדגם של הרחפנים האלה בלשונית «ניהול רחפנים» כדי שייכנסו לספירה.
+                </p>
+              </div>
+            )}
+
             {/* KPI cards */}
             <div className="grid grid-cols-3 gap-3">
               {([
@@ -2706,7 +2774,9 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                 <span className={`w-3 h-3 rounded-full ring-2 flex-shrink-0 ${dot}`} />
                                 <div className="min-w-0">
                                   <p className="text-white font-medium truncate">{row.pilot.name}</p>
-                                  <p className="text-[10px] text-slate-500">עמד ב־{row.met.length}/{row.required.length} כלים</p>
+                                  <p className="text-[10px] text-slate-500">
+                                    ב{monthLabel(ctrlMonth).split(' ')[0]}: עמד ב־{row.met.length}/{row.required.length} כלים
+                                  </p>
                                 </div>
                               </div>
                             </td>
@@ -3296,6 +3366,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <div className="p-5 border-b border-slate-700/50 flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-emerald-400">🚦</span> מפת כשירות טייסים
+                  <span className="text-[11px] font-normal text-slate-400">— מצטבר, כל הזמנים</span>
                 </h2>
                 <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
                   <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> הטיס את כל הנדרשים</span>
@@ -3308,9 +3379,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 {(() => {
                   const lightFor = (p: Pilot): { light: QualificationLight; flown: number; total: number; isOverride: boolean; required: string[] } => {
                     const flownSet = pilotEverFlew[p.id] ?? new Set<string>()
-                    const required = (p.requiredDroneModels && p.requiredDroneModels.length > 0)
-                      ? p.requiredDroneModels
-                      : MATRIX_MODELS
+                    const required = requiredModelsFor(p)
                     const flown = required.filter(m => flownSet.has(m)).length
                     const total = required.length
                     const auto: QualificationLight = flown === 0 ? 'red' : (flown >= total ? 'green' : 'orange')
@@ -3343,7 +3412,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                 )}
                               </div>
                               <p className="text-[11px] text-slate-400">
-                                הטיס {flown}/{total} {isConfigured ? 'מהנדרשים' : 'דגמים'}
+                                הטיס אי־פעם {flown}/{total} {isConfigured ? 'מהנדרשים' : 'דגמים'}
                               </p>
                               {isConfigured && (
                                 <p className="text-[10px] text-slate-500 truncate" title={required.join(' · ')}>
