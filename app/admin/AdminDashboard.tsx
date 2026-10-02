@@ -423,7 +423,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
             <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
           </div>
           <div className="sm:col-span-2">
-            <label className={labelCls}>תצפיתן (אופציונלי)</label>
+            <label className={labelCls}>תצפיתנים (אופציונלי · ניתן להוסיף עד 2 תצפיתנים)</label>
             <div className="space-y-2">
               {form.observers.map((obs, idx) => (
                 <div key={idx} className="flex gap-2 items-center">
@@ -443,11 +443,13 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
                   )}
                 </div>
               ))}
-              <button type="button"
-                onClick={() => setForm(f => ({ ...f, observers: [...f.observers, ''] }))}
-                className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
-                + הוסף תצפיתן
-              </button>
+              {form.observers.length < 2 && (
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                  + הוסף תצפיתן שני
+                </button>
+              )}
             </div>
           </div>
           <div className="sm:col-span-2">
@@ -950,14 +952,18 @@ export default function AdminDashboard() {
     if (saved >= 1 && saved <= 20) setCtrlThreshold(saved)
   }, [])
   useEffect(() => { localStorage.setItem('ctrlThreshold', String(ctrlThreshold)) }, [ctrlThreshold])
-  const [addForm, setAddForm] = useState({
+  // Admin's add-flight form supports multi-segment entries (multiple takeoff/
+  // landing pairs that all save as separate Flight rows with the same metadata).
+  const emptyAdminAddForm = {
     pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk',
     battery: '', startTime: '', endTime: '',
+    segments: [{ startTime: '', endTime: '' }] as { startTime: string; endTime: string }[],
     observers: [''], gasDropped: false, eventNumber: '', battalions: [''],
     policeLogbookEntered: false,
     batteryCount: 1, note: '',
     isTraining: false,
-  })
+  }
+  const [addForm, setAddForm] = useState(emptyAdminAddForm)
   const [addError, setAddError] = useState('')
   const [addSuccess, setAddSuccess] = useState('')
   const [expandedPilot, setExpandedPilot] = useState<string | null>(null)
@@ -1315,11 +1321,17 @@ export default function AdminDashboard() {
   // missing from it, so its flights mapped to no model and were silently
   // dropped from the qualification matrix AND the monthly control. Merging the
   // DB fleet over the static list makes new drones count automatically.
-  const tailToModel: Record<string, string> = { ...TAIL_TO_MATRIX_MODEL }
+  // Lookup is case-insensitive — flights imported from legacy sources sometimes
+  // store the tail uppercase ("4X-YXB") while drones.ts and the DB keep it
+  // lowercase ("4x-yxb"), which left those flights unmapped in the bקרה.
+  const tailToModel: Record<string, string> = {}
+  Object.entries(TAIL_TO_MATRIX_MODEL).forEach(([k, v]) => { tailToModel[k.toLowerCase()] = v })
   droneDetails.forEach(d => {
     const m = toMatrixModel(d.model)
-    if (m) tailToModel[d.tailNumber] = m
+    if (m) tailToModel[d.tailNumber.toLowerCase()] = m
   })
+  const lookupModel = (tail: string | undefined | null): string | undefined =>
+    tail ? tailToModel[tail.toLowerCase()] : undefined
 
   // ── Active matrix models (live fleet) ─────────────────────────────────────
   // Only models with at least one drone in the DB show up in the monthly /
@@ -1334,7 +1346,7 @@ export default function AdminDashboard() {
 
   // Flights whose drone can't be resolved to a model — surfaced in the UI so
   // this can never silently under-report again.
-  const unmappedFlights = db.flights.filter(f => !tailToModel[f.tailNumber])
+  const unmappedFlights = db.flights.filter(f => !lookupModel(f.tailNumber))
   const unmappedTails = Array.from(new Set(unmappedFlights.map(f => f.tailNumber || '(ריק)')))
 
   // Pilot training matrix
@@ -1342,7 +1354,7 @@ export default function AdminDashboard() {
   const pilotMonthlyFlew: Record<string, Set<string>> = {}
   db.pilots.forEach(p => { pilotEverFlew[p.id] = new Set(); pilotMonthlyFlew[p.id] = new Set() })
   db.flights.forEach(f => {
-    const model = tailToModel[f.tailNumber]
+    const model = lookupModel(f.tailNumber)
     if (!model) return
     if (pilotEverFlew[f.pilotId]) pilotEverFlew[f.pilotId].add(model)
     if (f.date.startsWith(thisMonth) && pilotMonthlyFlew[f.pilotId]) pilotMonthlyFlew[f.pilotId].add(model)
@@ -1401,7 +1413,7 @@ export default function AdminDashboard() {
   const pilotLastMonthFlewModel: Record<string, Record<string, string>> = {}
   db.pilots.forEach(p => { pilotLastFlewModel[p.id] = {}; pilotLastMonthFlewModel[p.id] = {} })
   db.flights.forEach(f => {
-    const model = tailToModel[f.tailNumber]
+    const model = lookupModel(f.tailNumber)
     if (!model) return
     if (pilotLastFlewModel[f.pilotId]) {
       const cur = pilotLastFlewModel[f.pilotId][model]
@@ -1431,7 +1443,7 @@ export default function AdminDashboard() {
     db.pilots.forEach(p => { out[p.id] = {} })
     db.flights.forEach(f => {
       if (!f.date.startsWith(ym)) return
-      const model = tailToModel[f.tailNumber]
+      const model = lookupModel(f.tailNumber)
       if (!model || !out[f.pilotId]) return
       const cur = out[f.pilotId][model] ?? { flights: 0, minutes: 0, lastDate: '' }
       cur.flights += 1
@@ -1533,14 +1545,19 @@ export default function AdminDashboard() {
 
   const handleAddFlight = async () => {
     setAddError(''); setAddSuccess('')
-    const { pilotId, date, startTime, endTime } = addForm
+    const { pilotId, date } = addForm
     if (!pilotId || !date) { setAddError('טייס ותאריך הם שדות חובה'); return }
-    if (startTime && endTime) {
-      const dur = calcDuration(startTime, endTime)
-      if (dur <= 0) { setAddError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
+
+    // Multi-segment: each (startTime,endTime) pair becomes its own flight row.
+    const validSegs = addForm.segments.filter(s => s.startTime || s.endTime)
+    if (validSegs.length === 0) validSegs.push({ startTime: '', endTime: '' })
+    for (const s of validSegs) {
+      if (s.startTime && s.endTime) {
+        const dur = calcDuration(s.startTime, s.endTime)
+        if (dur <= 0) { setAddError('שעת סיום חייבת להיות לאחר שעת התחלה בכל הטסה'); return }
+      }
     }
     const pilot = db.pilots.find(p => p.id === pilotId)!
-    const duration = startTime && endTime ? calcDuration(startTime, endTime) : 0
 
     // If admin marked this as a training flight, create a training mission so it
     // shows up properly in the trainings tab and the operational/training split.
@@ -1565,26 +1582,35 @@ export default function AdminDashboard() {
       missionId = mission.id
     }
 
-    const res = await fetch('/api/flights', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pilotId, pilotName: pilot.name, date,
-        missionName: addForm.missionName, tailNumber: addForm.tailNumber, battery: addForm.battery,
-        missionId,
-        startTime, endTime, duration,
-        observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
-        battalion: addForm.isTraining ? [] : addForm.battalions.filter(Boolean),
-        policeLogbookEntered: addForm.policeLogbookEntered,
-        batteryCount: addForm.batteryCount,
-        note: addForm.note,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
+    let okCount = 0
+    for (const s of validSegs) {
+      const duration = s.startTime && s.endTime ? calcDuration(s.startTime, s.endTime) : 0
+      const res = await fetch('/api/flights', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pilotId, pilotName: pilot.name, date,
+          missionName: addForm.missionName, tailNumber: addForm.tailNumber, battery: addForm.battery,
+          missionId,
+          startTime: s.startTime, endTime: s.endTime, duration,
+          observer: addForm.observers.filter(Boolean), gasDropped: addForm.gasDropped, eventNumber: addForm.eventNumber,
+          battalion: addForm.isTraining ? [] : addForm.battalions.filter(Boolean),
+          policeLogbookEntered: addForm.policeLogbookEntered,
+          batteryCount: addForm.batteryCount,
+          note: addForm.note,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setAddError(err.error === 'DB_MIGRATION_NEEDED' ? 'נדרש עדכון DB — ראה חלונית האזהרה בראש הדף' : (err.error ?? `שגיאה בשמירה (${res.status})`))
+        if (okCount > 0) fetchDB()
+        return
+      }
+      okCount++
     }
-    setAddSuccess(`טיסה ${addForm.isTraining ? 'אימון ' : ''}נוספה בהצלחה עבור ${pilot.name}`)
-    setAddForm({ pilotId: '', date: '', missionName: '', tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', observers: [''], gasDropped: false, eventNumber: '', battalions: [''], policeLogbookEntered: false, batteryCount: 1, note: '', isTraining: false })
+    setAddSuccess(okCount > 1
+      ? `${okCount} הטסות נוספו בהצלחה עבור ${pilot.name}`
+      : `טיסה ${addForm.isTraining ? 'אימון ' : ''}נוספה בהצלחה עבור ${pilot.name}`)
+    setAddForm({ ...emptyAdminAddForm, segments: [{ startTime: '', endTime: '' }] })
     fetchMissions()
     fetchDB()
   }
@@ -3069,16 +3095,52 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   )
                 })()}
               </div>
-              <div>
-                <label className={labelCls}>שעת המראה</label>
-                <input type="time" value={addForm.startTime} onChange={e => setAddForm(f => ({ ...f, startTime: e.target.value }))} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>שעת נחיתה</label>
-                <input type="time" value={addForm.endTime} onChange={e => setAddForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls} />
+              <div className="sm:col-span-2 bg-slate-700/30 border border-slate-600/40 rounded-xl p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-slate-300">
+                    שעות הטסה {addForm.segments.length > 1 && <span className="text-blue-400">({addForm.segments.length} הטסות)</span>}
+                  </p>
+                  <span className="text-[10px] text-slate-500">כל זוג = הטסה נפרדת, אותם פרטים</span>
+                </div>
+                {addForm.segments.map((seg, idx) => {
+                  const dur = seg.startTime && seg.endTime ? calcDuration(seg.startTime, seg.endTime) : 0
+                  return (
+                    <div key={idx} className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-medium text-slate-400">הטסה {idx + 1}{dur > 0 && <span className="text-blue-400 mr-2">· {fmtHours(dur)}</span>}</span>
+                        {addForm.segments.length > 1 && (
+                          <button type="button"
+                            onClick={() => setAddForm(f => ({ ...f, segments: f.segments.filter((_, i) => i !== idx) }))}
+                            className="text-[11px] text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 px-2 py-0.5 rounded">
+                            − הסר
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת המראה</label>
+                          <input type="time" value={seg.startTime}
+                            onChange={e => setAddForm(f => ({ ...f, segments: f.segments.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x) }))}
+                            className={inputCls} />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת נחיתה</label>
+                          <input type="time" value={seg.endTime}
+                            onChange={e => setAddForm(f => ({ ...f, segments: f.segments.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x) }))}
+                            className={inputCls} />
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                <button type="button"
+                  onClick={() => setAddForm(f => ({ ...f, segments: [...f.segments, { startTime: '', endTime: '' }] }))}
+                  className="w-full text-xs text-blue-300 hover:text-blue-200 bg-blue-900/20 border border-blue-700/30 py-2 rounded-lg transition-all">
+                  + הוסף הטסה נוספת
+                </button>
               </div>
               <div className="sm:col-span-2">
-                <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                <label className={labelCls}>תצפיתנים (אופציונלי · ניתן להוסיף עד 2 תצפיתנים)</label>
                 <div className="space-y-2">
                   {addForm.observers.map((obs, idx) => (
                     <div key={idx} className="flex gap-2 items-center">
@@ -3098,11 +3160,13 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       )}
                     </div>
                   ))}
-                  <button type="button"
-                    onClick={() => setAddForm(f => ({ ...f, observers: [...f.observers, ''] }))}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
-                    + הוסף תצפיתן
-                  </button>
+                  {addForm.observers.length < 2 && (
+                    <button type="button"
+                      onClick={() => setAddForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                      + הוסף תצפיתן שני
+                    </button>
+                  )}
                 </div>
               </div>
               {!addForm.isTraining && (

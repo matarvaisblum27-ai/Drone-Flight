@@ -431,13 +431,18 @@ export default function PilotDashboard() {
   const [missionError, setMissionError] = useState('')
 
   // ── Flight step (step 2) ──────────────────────────────────────────────────
-  const [flightForm, setFlightForm] = useState({
-    tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '',
+  // Multiple takeoff/landing pairs ("segments") can be entered on a single
+  // submission — they share the same pilot, drone, battery, observer, etc.
+  // and are saved as separate Flight rows.
+  const emptyFlightForm = {
+    tailNumber: '4x-pzk', battery: '',
+    segments: [{ startTime: '', endTime: '' }] as { startTime: string; endTime: string }[],
     gasDropped: false, eventNumber: '',
     policeLogbookEntered: false,
     batteryCount: 1,
     note: '',
-  })
+  }
+  const [flightForm, setFlightForm] = useState(emptyFlightForm)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
@@ -662,34 +667,52 @@ export default function PilotDashboard() {
     setFormSuccess('')
     if (!selectedMission) { setFormError('שגיאה: לא נבחרה משימה'); return }
     if (!pilot) { setFormError('שגיאה: טייס לא מזוהה'); return }
-    const { startTime, endTime } = flightForm
-    if (startTime && endTime) {
-      const dur = calcDuration(startTime, endTime)
-      if (dur <= 0) { setFormError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
+
+    // Filter out empty segments but validate those that have both times.
+    const segs = flightForm.segments
+    const validSegs = segs.filter(s => s.startTime || s.endTime)
+    if (validSegs.length === 0) {
+      // No times at all → one record with 0 duration (same as before).
+      validSegs.push({ startTime: '', endTime: '' })
     }
-    const duration = startTime && endTime ? calcDuration(startTime, endTime) : 0
-    const res = await fetch('/api/flights', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pilotId: pilot.id, pilotName: pilot.name,
-        date: selectedMission.date, missionName: selectedMission.name,
-        missionId: selectedMission.id,
-        tailNumber: flightForm.tailNumber, battery: flightForm.battery,
-        startTime, endTime, duration,
-        observer: selectedMission.observer,
-        gasDropped: flightForm.gasDropped, eventNumber: flightForm.eventNumber,
-        battalion: selectedMission.battalion,
-        policeLogbookEntered: flightForm.policeLogbookEntered,
-        batteryCount: flightForm.batteryCount,
-        note: flightForm.note,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`)); return
+    for (const s of validSegs) {
+      if (s.startTime && s.endTime) {
+        const dur = calcDuration(s.startTime, s.endTime)
+        if (dur <= 0) { setFormError('שעת סיום חייבת להיות לאחר שעת התחלה בכל הטסה'); return }
+      }
     }
-    setFormSuccess('טיסה נרשמה בהצלחה!')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' })
+
+    // POST each segment as a separate flight. We save them sequentially so we
+    // can surface the first error cleanly.
+    let okCount = 0
+    for (const s of validSegs) {
+      const duration = s.startTime && s.endTime ? calcDuration(s.startTime, s.endTime) : 0
+      const res = await fetch('/api/flights', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pilotId: pilot.id, pilotName: pilot.name,
+          date: selectedMission.date, missionName: selectedMission.name,
+          missionId: selectedMission.id,
+          tailNumber: flightForm.tailNumber, battery: flightForm.battery,
+          startTime: s.startTime, endTime: s.endTime, duration,
+          observer: selectedMission.observer,
+          gasDropped: flightForm.gasDropped, eventNumber: flightForm.eventNumber,
+          battalion: selectedMission.battalion,
+          policeLogbookEntered: flightForm.policeLogbookEntered,
+          batteryCount: flightForm.batteryCount,
+          note: flightForm.note,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setFormError(err.error === 'DB_MIGRATION_NEEDED' ? 'שגיאת מערכת — פנה למפקד' : (err.error ?? `שגיאה בשמירה (${res.status})`))
+        if (okCount > 0) fetchDB()
+        return
+      }
+      okCount++
+    }
+    setFormSuccess(okCount > 1 ? `${okCount} הטסות נרשמו בהצלחה!` : 'טיסה נרשמה בהצלחה!')
+    setFlightForm({ ...emptyFlightForm, segments: [{ startTime: '', endTime: '' }] })
     fetchDB()
   }
 
@@ -699,7 +722,7 @@ export default function PilotDashboard() {
     setSelectedMission(null)
     setSimilarMission(null)
     setMissionPick('')
-    setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' })
+    setFlightForm({ ...emptyFlightForm, segments: [{ startTime: '', endTime: '' }] })
     setFormError('')
     setFormSuccess('')
     setMissionError('')
@@ -738,7 +761,9 @@ export default function PilotDashboard() {
   const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
-  const durationPreview = flightForm.startTime && flightForm.endTime ? calcDuration(flightForm.startTime, flightForm.endTime) : null
+  // Preview = total duration across every valid takeoff/landing segment.
+  const durationPreview = flightForm.segments.reduce((a, s) =>
+    a + (s.startTime && s.endTime ? Math.max(0, calcDuration(s.startTime, s.endTime)) : 0), 0) || null
 
   return (
     <div className="min-h-screen">
@@ -1039,7 +1064,7 @@ export default function PilotDashboard() {
                       </div>
                       )}
                       <div className="sm:col-span-2">
-                        <label className={labelCls}>תצפיתן (אופציונלי)</label>
+                        <label className={labelCls}>תצפיתנים (אופציונלי · ניתן להוסיף עד 2 תצפיתנים)</label>
                         <div className="space-y-2">
                           {missionForm.observers.map((obs, idx) => (
                             <div key={idx} className="flex gap-2 items-center">
@@ -1059,11 +1084,13 @@ export default function PilotDashboard() {
                               )}
                             </div>
                           ))}
-                          <button type="button"
-                            onClick={() => setMissionForm(f => ({ ...f, observers: [...f.observers, ''] }))}
-                            className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
-                            + הוסף תצפיתן
-                          </button>
+                          {missionForm.observers.length < 2 && (
+                            <button type="button"
+                              onClick={() => setMissionForm(f => ({ ...f, observers: [...f.observers, ''] }))}
+                              className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-900/20 border border-indigo-700/30 px-3 py-1.5 rounded-lg transition-all">
+                              + הוסף תצפיתן שני
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1134,17 +1161,49 @@ export default function PilotDashboard() {
                       onChange={e => setFlightForm(f => ({ ...f, batteryCount: Math.max(1, Number(e.target.value) || 1) }))}
                       className={inputCls} />
                   </div>
-                  <div>
-                    <label className={labelCls}>שעת המראה</label>
-                    <input type="time" value={flightForm.startTime}
-                      onChange={e => setFlightForm(f => ({ ...f, startTime: e.target.value }))}
-                      className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>שעת נחיתה</label>
-                    <input type="time" value={flightForm.endTime}
-                      onChange={e => setFlightForm(f => ({ ...f, endTime: e.target.value }))}
-                      className={inputCls} />
+                  <div className="sm:col-span-2 bg-slate-700/30 border border-slate-600/40 rounded-xl p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-slate-300">
+                        שעות הטסה {flightForm.segments.length > 1 && <span className="text-blue-400">({flightForm.segments.length} הטסות)</span>}
+                      </p>
+                      <span className="text-[10px] text-slate-500">כל זוג = הטסה נפרדת באותה משימה</span>
+                    </div>
+                    {flightForm.segments.map((seg, idx) => {
+                      const dur = seg.startTime && seg.endTime ? calcDuration(seg.startTime, seg.endTime) : 0
+                      return (
+                        <div key={idx} className="bg-slate-800/40 border border-slate-700/40 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-medium text-slate-400">הטסה {idx + 1}{dur > 0 && <span className="text-blue-400 mr-2">· {fmtHours(dur)}</span>}</span>
+                            {flightForm.segments.length > 1 && (
+                              <button type="button"
+                                onClick={() => setFlightForm(f => ({ ...f, segments: f.segments.filter((_, i) => i !== idx) }))}
+                                className="text-[11px] text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 px-2 py-0.5 rounded">
+                                − הסר
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת המראה</label>
+                              <input type="time" value={seg.startTime}
+                                onChange={e => setFlightForm(f => ({ ...f, segments: f.segments.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x) }))}
+                                className={inputCls} />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת נחיתה</label>
+                              <input type="time" value={seg.endTime}
+                                onChange={e => setFlightForm(f => ({ ...f, segments: f.segments.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x) }))}
+                                className={inputCls} />
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <button type="button"
+                      onClick={() => setFlightForm(f => ({ ...f, segments: [...f.segments, { startTime: '', endTime: '' }] }))}
+                      className="w-full text-xs text-blue-300 hover:text-blue-200 bg-blue-900/20 border border-blue-700/30 py-2 rounded-lg transition-all">
+                      + הוסף הטסה נוספת (אותם פרטים, שעות שונות)
+                    </button>
                   </div>
                   {(flightForm.tailNumber === '4x-ujs' || flightForm.tailNumber === '4x-xpg') && (
                     <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
@@ -1186,13 +1245,14 @@ export default function PilotDashboard() {
                   </div>
                 </div>
 
-                {/* Duration preview */}
+                {/* Duration preview — total across all segments */}
                 {durationPreview !== null && durationPreview > 0 && (
                   <div className="mt-4 bg-blue-900/20 border border-blue-700/40 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-center gap-2">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    משך טיסה מחושב: <strong>{fmtHours(durationPreview)}</strong> ({durationPreview} דקות)
+                    סה&quot;כ זמן הטסה: <strong>{fmtHours(durationPreview)}</strong> ({durationPreview} דקות)
+                    {flightForm.segments.length > 1 && <span className="text-blue-400/80 mr-2">· {flightForm.segments.length} הטסות</span>}
                   </div>
                 )}
 
@@ -1206,7 +1266,7 @@ export default function PilotDashboard() {
                       {formSuccess}
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setFormSuccess(''); setFlightForm({ tailNumber: '4x-pzk', battery: '', startTime: '', endTime: '', gasDropped: false, eventNumber: '', policeLogbookEntered: false, batteryCount: 1, note: '' }) }}
+                      <button onClick={() => { setFormSuccess(''); setFlightForm({ ...emptyFlightForm, segments: [{ startTime: '', endTime: '' }] }) }}
                         className="flex-1 px-4 py-2.5 text-sm text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all font-medium">
                         טיסה נוספת למשימה זו
                       </button>
