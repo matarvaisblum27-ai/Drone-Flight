@@ -1321,6 +1321,17 @@ export default function AdminDashboard() {
     if (m) tailToModel[d.tailNumber] = m
   })
 
+  // ── Active matrix models (live fleet) ─────────────────────────────────────
+  // Only models with at least one drone in the DB show up in the monthly /
+  // overall qualification matrices. Deleting the last drone of a model via
+  // "ניהול רחפנים" removes that model's column everywhere next render.
+  const liveModels = Array.from(new Set(
+    droneDetails.map(d => toMatrixModel(d.model)).filter((m): m is string => m !== null)
+  ))
+  const activeModels: string[] = liveModels.length > 0
+    ? MATRIX_MODELS.filter(m => liveModels.includes(m))
+    : MATRIX_MODELS
+
   // Flights whose drone can't be resolved to a model — surfaced in the UI so
   // this can never silently under-report again.
   const unmappedFlights = db.flights.filter(f => !tailToModel[f.tailNumber])
@@ -1336,6 +1347,54 @@ export default function AdminDashboard() {
     if (pilotEverFlew[f.pilotId]) pilotEverFlew[f.pilotId].add(model)
     if (f.date.startsWith(thisMonth) && pilotMonthlyFlew[f.pilotId]) pilotMonthlyFlew[f.pilotId].add(model)
   })
+
+  // Per-pilot required-models — restricted set when the admin configured
+  // custom requirements for the pilot (ניהול טייסים → מפת כשירות), otherwise
+  // the full active fleet.
+  const pilotActiveRequired = (pilot: Pilot): string[] => {
+    const configured = normalizeRequiredModels(pilot.requiredDroneModels)
+    const base = configured.length > 0 ? configured : activeModels
+    // Clip to models that actually have drones in the fleet right now.
+    return base.filter(m => activeModels.includes(m))
+  }
+
+  // "Monthly complete" — explicit admin override OR every required model
+  // has at least one flight this month.
+  const isMonthlyComplete = (pilot: Pilot): boolean => {
+    if (pilot.monthlyOverrides?.[thisMonth]) return true
+    const req = pilotActiveRequired(pilot)
+    if (req.length === 0) return false
+    const flown = pilotMonthlyFlew[pilot.id] ?? new Set<string>()
+    return req.every(m => flown.has(m))
+  }
+
+  // Monthly dot state for a specific pilot × model.
+  //   'flew'  → green (either real flight this month or admin override)
+  //   'needed' → red (required but not flown)
+  //   'not-required' → gray (model exists in fleet but pilot not required)
+  const monthlyDotState = (pilot: Pilot, model: string): 'flew' | 'needed' | 'not-required' => {
+    if (pilot.monthlyOverrides?.[thisMonth]) return 'flew'
+    const req = pilotActiveRequired(pilot)
+    if (!req.includes(model)) return 'not-required'
+    return pilotMonthlyFlew[pilot.id]?.has(model) ? 'flew' : 'needed'
+  }
+
+  // Toggle the "I did my monthly" admin override for a given pilot.
+  const toggleMonthlyOverride = async (pilot: Pilot) => {
+    const current = !!pilot.monthlyOverrides?.[thisMonth]
+    const nextValue = !current
+    // Optimistic update
+    setDb(prev => prev ? {
+      ...prev,
+      pilots: prev.pilots.map(x => x.id === pilot.id
+        ? { ...x, monthlyOverrides: { ...(x.monthlyOverrides ?? {}), [thisMonth]: nextValue } }
+        : x),
+    } : prev)
+    await fetch('/api/pilots', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: pilot.id, monthlyOverrideMonth: thisMonth, monthlyOverrideValue: nextValue }),
+    })
+  }
 
   // Last date each pilot flew each model (all-time & this month)
   const pilotLastFlewModel: Record<string, Record<string, string>> = {}
@@ -1386,10 +1445,12 @@ export default function AdminDashboard() {
   const ctrlCur  = statsForMonth(ctrlMonth)
   const ctrlPrev = statsForMonth(ctrlPrevMonth)
 
-  /** Required models for a pilot — the per-pilot list if configured, else all. */
+  /** Required models for a pilot — the per-pilot list if configured, else the
+   *  current active fleet. Always clipped to models that still exist. */
   const requiredModelsFor = (p: Pilot): string[] => {
     const configured = normalizeRequiredModels(p.requiredDroneModels)
-    return configured.length > 0 ? configured : MATRIX_MODELS
+    const base = configured.length > 0 ? configured : activeModels
+    return base.filter(m => activeModels.includes(m))
   }
 
   interface ControlRow {
@@ -1411,9 +1472,12 @@ export default function AdminDashboard() {
     const prev = ctrlPrev[p.id] ?? {}
     const met: string[] = []
     const gaps: { model: string; done: number; missing: number }[] = []
+    // If the admin manually marked this control-month complete for the pilot,
+    // every required model is treated as met and no gaps are reported.
+    const forcedComplete = !!p.monthlyOverrides?.[ctrlMonth]
     required.forEach(m => {
       const done = cur[m]?.flights ?? 0
-      if (done >= ctrlThreshold) met.push(m)
+      if (forcedComplete || done >= ctrlThreshold) met.push(m)
       else gaps.push({ model: m, done, missing: ctrlThreshold - done })
     })
     const sum = (rec: Record<string, ModelStat>, key: 'flights' | 'minutes') =>
@@ -2463,7 +2527,10 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               <div className="sm:hidden divide-y divide-slate-700/30" dir="rtl">
                 {db.pilots.map(pilot => {
                   const isExpanded = expandedPilot === pilot.id
-                  const monthlyCount = MATRIX_MODELS.filter(m => pilotMonthlyFlew[pilot.id]?.has(m)).length
+                  const required = pilotActiveRequired(pilot)
+                  const monthlyOverride = !!pilot.monthlyOverrides?.[thisMonth]
+                  const monthlyCount = monthlyOverride ? required.length : required.filter(m => pilotMonthlyFlew[pilot.id]?.has(m)).length
+                  const monthlyTotal = required.length
                   return (
                     <div key={pilot.id}>
                       {/* Pilot header row */}
@@ -2479,11 +2546,11 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                            monthlyCount === MATRIX_MODELS.length ? 'bg-green-900/50 text-green-400 border border-green-700/40'
+                            monthlyTotal > 0 && monthlyCount >= monthlyTotal ? 'bg-green-900/50 text-green-400 border border-green-700/40'
                             : monthlyCount > 0 ? 'bg-amber-900/50 text-amber-400 border border-amber-700/40'
                             : 'bg-red-900/50 text-red-400 border border-red-700/40'
                           }`}>
-                            {monthlyCount}/{MATRIX_MODELS.length} החודש
+                            {monthlyOverride ? '✓ ' : ''}{monthlyCount}/{monthlyTotal} החודש
                           </span>
                           <svg
                             className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
@@ -2530,7 +2597,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           <div>
                             <p className="text-xs font-medium text-slate-400 mb-3">כשירות כללית</p>
                             <div className="flex flex-wrap gap-3">
-                              {MATRIX_MODELS.map(model => {
+                              {activeModels.map(model => {
                                 const flew = pilotEverFlew[pilot.id]?.has(model)
                                 const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'ever'
                                 return (
@@ -2553,23 +2620,41 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
                           {/* אימון חודשי */}
                           <div className="bg-amber-900/10 rounded-xl p-4 border border-amber-600/20">
-                            <p className="text-xs font-medium text-amber-400/90 mb-3">אימון חודשי</p>
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-xs font-medium text-amber-400/90">
+                                אימון חודשי {monthlyOverride && <span className="text-emerald-300">· סומן ידנית</span>}
+                              </p>
+                              {canManageData && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); toggleMonthlyOverride(pilot) }}
+                                  className={`text-[10px] px-2 py-0.5 rounded-md border transition-all ${monthlyOverride
+                                    ? 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300 hover:bg-emerald-900/60'
+                                    : 'bg-slate-700/40 border-slate-600/50 text-slate-300 hover:bg-slate-700/60'}`}
+                                >
+                                  {monthlyOverride ? '✓ בוצע' : 'סמן כבוצע'}
+                                </button>
+                              )}
+                            </div>
                             <div className="flex flex-wrap gap-3">
-                              {MATRIX_MODELS.map(model => {
-                                const flew = pilotMonthlyFlew[pilot.id]?.has(model)
+                              {activeModels.map(model => {
+                                const state = monthlyDotState(pilot, model)
                                 const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'monthly'
+                                const bgCls = state === 'flew' ? 'bg-green-500/20 border-green-500'
+                                  : state === 'needed' ? 'bg-red-500/10 border-red-500/60'
+                                  : 'bg-slate-700/20 border-slate-600/40'
+                                const dotCls = state === 'flew' ? 'bg-green-500'
+                                  : state === 'needed' ? 'bg-red-500/70'
+                                  : 'bg-slate-500/40'
                                 return (
                                   <button
                                     key={model}
                                     onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'monthly' }) }}
                                     className="flex flex-col items-center gap-1.5 transition-transform active:scale-90"
                                   >
-                                    <div className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all ${
-                                      flew ? 'bg-green-500/20 border-green-500' : 'bg-red-500/10 border-red-500/60'
-                                    } ${isActive ? 'ring-2 ring-offset-1 ring-offset-slate-800 ring-white/40 scale-110' : ''}`}>
-                                      <span className={`w-7 h-7 rounded-full ${flew ? 'bg-green-500' : 'bg-red-500/70'}`} />
+                                    <div className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all ${bgCls} ${isActive ? 'ring-2 ring-offset-1 ring-offset-slate-800 ring-white/40 scale-110' : ''}`}>
+                                      <span className={`w-7 h-7 rounded-full ${dotCls}`} />
                                     </div>
-                                    <span className="text-[10px] text-slate-500 text-center w-14 leading-tight">{model}</span>
+                                    <span className={`text-[10px] text-center w-14 leading-tight ${state === 'not-required' ? 'text-slate-600' : 'text-slate-500'}`}>{model}</span>
                                   </button>
                                 )
                               })}
@@ -2589,23 +2674,26 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   <thead>
                     <tr className="bg-slate-700/30">
                       <th rowSpan={2} className="px-5 py-3 text-xs font-medium text-slate-400 text-right align-bottom border-b border-slate-700/50">טייס</th>
-                      <th colSpan={MATRIX_MODELS.length} className="px-3 py-2 text-xs font-medium text-slate-300 text-center border-b border-l border-slate-700/50">כשירות כללית</th>
-                      <th colSpan={MATRIX_MODELS.length} className="px-3 py-2 text-xs font-medium text-amber-400/90 text-center border-b border-slate-700/50">אימון חודשי</th>
+                      <th colSpan={activeModels.length} className="px-3 py-2 text-xs font-medium text-slate-300 text-center border-b border-l border-slate-700/50">כשירות כללית</th>
+                      <th colSpan={activeModels.length + (canManageData ? 1 : 0)} className="px-3 py-2 text-xs font-medium text-amber-400/90 text-center border-b border-slate-700/50">אימון חודשי</th>
                     </tr>
                     <tr className="bg-slate-700/20">
-                      {MATRIX_MODELS.map(m => (
+                      {activeModels.map(m => (
                         <th key={`eh-${m}`} className="px-2 py-2 text-xs text-slate-400 font-normal text-center min-w-[4.5rem]">{m}</th>
                       ))}
-                      {MATRIX_MODELS.map((m, idx) => (
+                      {activeModels.map((m, idx) => (
                         <th key={`mh-${m}`} className={`px-2 py-2 text-xs text-amber-400/70 font-normal text-center min-w-[4.5rem] ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>{m}</th>
                       ))}
+                      {canManageData && <th className="px-2 py-2 text-xs text-emerald-400/80 font-normal text-center min-w-[5rem]">סמן</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
-                    {db.pilots.map(pilot => (
+                    {db.pilots.map(pilot => {
+                      const monthlyOverride = !!pilot.monthlyOverrides?.[thisMonth]
+                      return (
                       <tr key={pilot.id} className="hover:bg-slate-700/20 transition-colors">
                         <td className="px-5 py-3 font-medium text-white whitespace-nowrap">{pilot.name}</td>
-                        {MATRIX_MODELS.map(model => {
+                        {activeModels.map(model => {
                           const flew = pilotEverFlew[pilot.id]?.has(model)
                           const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'ever'
                           return (
@@ -2627,21 +2715,26 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             </td>
                           )
                         })}
-                        {MATRIX_MODELS.map((model, idx) => {
-                          const flew = pilotMonthlyFlew[pilot.id]?.has(model)
+                        {activeModels.map((model, idx) => {
+                          const state = monthlyDotState(pilot, model)
                           const isActive = tooltip?.pilotId === pilot.id && tooltip?.model === model && tooltip?.type === 'monthly'
+                          const dotCls = state === 'flew' ? 'bg-green-500 hover:bg-green-400'
+                            : state === 'needed' ? 'bg-red-500/70 hover:bg-red-400/70'
+                            : 'bg-slate-500/40 hover:bg-slate-500/60'
                           return (
                             <td key={`m-${model}`} className={`text-center py-3 ${idx === 0 ? 'border-r-2 border-slate-600' : ''}`}>
                               <div className="relative inline-flex justify-center" onClick={e => e.stopPropagation()}>
                                 <button
                                   onClick={e => { e.stopPropagation(); setTooltip(isActive ? null : { pilotId: pilot.id, model, type: 'monthly' }) }}
-                                  className={`w-5 h-5 rounded-full transition-all hover:scale-125 ${flew ? 'bg-green-500 hover:bg-green-400' : 'bg-red-500/70 hover:bg-red-400/70'}`}
+                                  className={`w-5 h-5 rounded-full transition-all hover:scale-125 ${dotCls}`}
                                 />
                                 {isActive && (
                                   <div className="absolute top-full mt-2 z-20 bg-amber-900/90 border border-amber-700/60 rounded-lg px-3 py-2 text-xs text-amber-100 whitespace-nowrap shadow-xl pointer-events-none">
-                                    {flew
-                                      ? `בוצע ב‑${new Date(pilotLastMonthFlewModel[pilot.id]?.[model]).toLocaleDateString('he-IL')}`
-                                      : 'לא בוצע אימון החודש'}
+                                    {state === 'not-required'
+                                      ? 'לא נדרש לטייס זה'
+                                      : state === 'flew'
+                                        ? (monthlyOverride ? 'סומן ידנית ✓' : `בוצע ב‑${new Date(pilotLastMonthFlewModel[pilot.id]?.[model] ?? '').toLocaleDateString('he-IL')}`)
+                                        : 'לא בוצע אימון החודש'}
                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-amber-700/60" />
                                   </div>
                                 )}
@@ -2649,8 +2742,21 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                             </td>
                           )
                         })}
+                        {canManageData && (
+                          <td className="text-center py-3">
+                            <button
+                              onClick={e => { e.stopPropagation(); toggleMonthlyOverride(pilot) }}
+                              className={`text-[10px] px-2 py-1 rounded-md border transition-all ${monthlyOverride
+                                ? 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300 hover:bg-emerald-900/60'
+                                : 'bg-slate-700/40 border-slate-600/50 text-slate-300 hover:bg-slate-700/60'}`}
+                              title={monthlyOverride ? 'ביטול סימון ידני' : 'סמן כבוצע החודש'}
+                            >
+                              {monthlyOverride ? '✓ בוצע' : 'סמן'}
+                            </button>
+                          </td>
+                        )}
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -2744,7 +2850,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   <thead className="bg-slate-900/50">
                     <tr>
                       <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-300 sticky right-0 bg-slate-900/80 z-10">מטיס</th>
-                      {MATRIX_MODELS.map(m => (
+                      {activeModels.map(m => (
                         <th key={m} className="px-2 py-2.5 text-center text-[11px] font-medium text-slate-300 whitespace-nowrap">{m}</th>
                       ))}
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-slate-300 whitespace-nowrap border-r border-slate-700/50">סה&quot;כ החודש</th>
@@ -2753,7 +2859,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   </thead>
                   <tbody className="divide-y divide-slate-700/40">
                     {ctrlVisibleRows.length === 0 && (
-                      <tr><td colSpan={MATRIX_MODELS.length + 3} className="py-10 text-center text-slate-500 text-sm">
+                      <tr><td colSpan={activeModels.length + 3} className="py-10 text-center text-slate-500 text-sm">
                         אין מטיסים להצגה 🎉
                       </td></tr>
                     )}
@@ -2780,7 +2886,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                 </div>
                               </div>
                             </td>
-                            {MATRIX_MODELS.map(m => {
+                            {activeModels.map(m => {
                               const isRequired = row.required.includes(m)
                               const c = cur[m]?.flights ?? 0
                               const p = prev[m]?.flights ?? 0
@@ -2809,7 +2915,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                           </tr>
                           {isOpen && (
                             <tr className="bg-slate-900/40">
-                              <td colSpan={MATRIX_MODELS.length + 3} className="px-4 py-3">
+                              <td colSpan={activeModels.length + 3} className="px-4 py-3">
                                 {row.gaps.length === 0 ? (
                                   <p className="text-sm text-green-400">✅ עמד בדרישה בכל {row.required.length} הכלים הנדרשים החודש.</p>
                                 ) : (

@@ -17,6 +17,19 @@ function parseModels(raw: any): string[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseMonthlyOverrides(raw: any): Record<string, boolean> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const out: Record<string, boolean> = {}
+    Object.entries(raw).forEach(([k, v]) => { if (typeof k === 'string' && /^\d{4}-\d{2}$/.test(k)) out[k] = !!v })
+    return out
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try { return parseMonthlyOverrides(JSON.parse(raw)) } catch { return {} }
+  }
+  return {}
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToPilot(row: any): Pilot {
   return {
     id: row.id,
@@ -25,13 +38,14 @@ function rowToPilot(row: any): Pilot {
     isAdmin: row.is_admin ?? false,
     qualificationOverride: row.qualification_override ?? null,
     requiredDroneModels: parseModels(row.required_drone_models),
+    monthlyOverrides: parseMonthlyOverrides(row.monthly_overrides),
   }
 }
 
 export async function GET() {
   const { data, error } = await supabase
     .from('pilots')
-    .select('id, name, license, is_admin, qualification_override, required_drone_models')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json((data ?? []).map(rowToPilot))
@@ -54,7 +68,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('pilots')
     .insert({ id: `p${Date.now()}`, name, license, password_hash, is_admin: false })
-    .select('id, name, license, is_admin, qualification_override, required_drone_models')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
     .single()
 
   if (error) {
@@ -76,7 +90,7 @@ export async function PUT(req: NextRequest) {
     body.id &&
     body.name === undefined &&
     body.license === undefined &&
-    (body.qualificationOverride !== undefined || body.requiredDroneModels !== undefined)
+    (body.qualificationOverride !== undefined || body.requiredDroneModels !== undefined || body.monthlyOverrideMonth !== undefined)
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const partialUpdates: Record<string, any> = {}
@@ -97,11 +111,31 @@ export async function PUT(req: NextRequest) {
       partialUpdates.required_drone_models = body.requiredDroneModels
     }
 
+    // Toggle a single month in monthly_overrides. The client sends
+    //   { id, monthlyOverrideMonth: "YYYY-MM", monthlyOverrideValue: true|false }
+    // We read-modify-write to only touch that key.
+    if (body.monthlyOverrideMonth !== undefined) {
+      const month = String(body.monthlyOverrideMonth)
+      if (!/^\d{4}-\d{2}$/.test(month)) {
+        return NextResponse.json({ error: 'monthlyOverrideMonth must be YYYY-MM' }, { status: 400 })
+      }
+      const value = !!body.monthlyOverrideValue
+      const { data: existing, error: fetchErr } = await supabase
+        .from('pilots').select('monthly_overrides').eq('id', body.id).single()
+      if (fetchErr || !existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
+      const current = (existing.monthly_overrides && typeof existing.monthly_overrides === 'object' && !Array.isArray(existing.monthly_overrides))
+        ? { ...existing.monthly_overrides as Record<string, boolean> }
+        : {}
+      if (value) current[month] = true
+      else delete current[month]
+      partialUpdates.monthly_overrides = current
+    }
+
     const { data, error } = await supabase
       .from('pilots')
       .update(partialUpdates)
       .eq('id', body.id)
-      .select('id, name, license, is_admin, qualification_override, required_drone_models')
+      .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(rowToPilot(data))
@@ -154,7 +188,7 @@ export async function PUT(req: NextRequest) {
     .from('pilots')
     .update(updates)
     .eq('id', body.id)
-    .select('id, name, license, is_admin, qualification_override, required_drone_models')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
     .single()
   console.log('[PUT /api/pilots] Supabase result:', { data: data ? { name: data.name, is_admin: data.is_admin } : null, error: error?.message })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

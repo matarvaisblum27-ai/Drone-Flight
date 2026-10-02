@@ -9,6 +9,9 @@ export interface Pilot {
   qualificationOverride?: QualificationLight | null
   /** Drone MODELS the pilot is required to be qualified on. Empty array = use the default list. */
   requiredDroneModels?: string[]
+  /** Admin manual override of monthly completion. Keyed by "YYYY-MM" month tag,
+   *  true means "pilot marked as having completed all required flights for that month". */
+  monthlyOverrides?: Record<string, boolean>
 }
 
 export interface Mission {
