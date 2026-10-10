@@ -1249,17 +1249,38 @@ export default function AdminDashboard() {
   const gasDropsThisYear = allGasDropsYTD.length
 
   // Battalion breakdown — unique missions (all-time for bar, YTD monthly for drill-down)
+  // Missions without ANY battalion assigned used to disappear here. They now
+  // fall under "ללא גדוד" so every mission is accounted for in the breakdown.
   interface BnMissionEntry { missionKey: string; missionName: string; date: string; pilots: string[]; drones: string[] }
+  const NO_BATTALION_LABEL = 'ללא גדוד'
+  const BATTALION_BUCKETS = [...BATTALIONS, NO_BATTALION_LABEL]
   const battalionMissionSets: Record<string, Set<string>> = {}
-  BATTALIONS.forEach(b => { battalionMissionSets[b] = new Set() })
-  db.flights.forEach(f => { f.battalion.forEach(b => { if (b && battalionMissionSets[b]) battalionMissionSets[b].add(missionKeyFn(f)) }) })
+  BATTALION_BUCKETS.forEach(b => { battalionMissionSets[b] = new Set() })
+  // Aggregate flights into unique missions, then bucket each mission into every
+  // battalion it mentions — OR into "ללא גדוד" if it has none.
+  const allMissionBattalions = new Map<string, Set<string>>()
+  db.flights.forEach(f => {
+    const key = missionKeyFn(f)
+    if (!allMissionBattalions.has(key)) allMissionBattalions.set(key, new Set())
+    f.battalion.forEach(b => { if (b) allMissionBattalions.get(key)!.add(b) })
+  })
+  allMissionBattalions.forEach((bns, key) => {
+    const buckets = bns.size > 0
+      ? Array.from(bns).filter(b => BATTALIONS.includes(b))
+      : []
+    if (buckets.length === 0) {
+      battalionMissionSets[NO_BATTALION_LABEL].add(key)
+    } else {
+      buckets.forEach(b => battalionMissionSets[b].add(key))
+    }
+  })
   const battalionCounts: Record<string, number> = {}
-  BATTALIONS.forEach(b => { battalionCounts[b] = battalionMissionSets[b].size })
+  BATTALION_BUCKETS.forEach(b => { battalionCounts[b] = battalionMissionSets[b].size })
   const maxBattalionCount = Math.max(...Object.values(battalionCounts), 1)
 
-  // YTD monthly missions per battalion
+  // YTD monthly missions per battalion (same bucketing rule)
   const battalionMonthlyMissions: Record<string, Record<string, BnMissionEntry[]>> = {}
-  BATTALIONS.forEach(b => { battalionMonthlyMissions[b] = {} })
+  BATTALION_BUCKETS.forEach(b => { battalionMonthlyMissions[b] = {} })
   const bnYtdMap = new Map<string, { name: string; date: string; pilots: Set<string>; drones: Set<string>; battalions: Set<string> }>()
   db.flights.filter(f => f.date.startsWith(thisYear)).forEach(f => {
     const key = missionKeyFn(f)
@@ -1271,8 +1292,10 @@ export default function AdminDashboard() {
   })
   bnYtdMap.forEach((mission, key) => {
     const month = mission.date.slice(0, 7)
-    mission.battalions.forEach(b => {
-      if (!battalionMonthlyMissions[b]) return
+    const known = Array.from(mission.battalions).filter(b => BATTALIONS.includes(b))
+    const buckets = known.length > 0 ? known : [NO_BATTALION_LABEL]
+    buckets.forEach(b => {
+      if (!battalionMonthlyMissions[b]) battalionMonthlyMissions[b] = {}
       if (!battalionMonthlyMissions[b][month]) battalionMonthlyMissions[b][month] = []
       battalionMonthlyMissions[b][month].push({ missionKey: key, missionName: mission.name, date: mission.date, pilots: (Array.from(mission.pilots) as string[]).sort(), drones: (Array.from(mission.drones) as string[]).sort() })
     })
@@ -1334,11 +1357,14 @@ export default function AdminDashboard() {
     tail ? tailToModel[tail.toLowerCase()] : undefined
 
   // ── Active matrix models (live fleet) ─────────────────────────────────────
-  // Only models with at least one drone in the DB show up in the monthly /
-  // overall qualification matrices. Deleting the last drone of a model via
-  // "ניהול רחפנים" removes that model's column everywhere next render.
+  // Only models with at least one ACTIVE drone show up in the monthly /
+  // overall qualification matrices. Retiring the last active drone of a model
+  // via "ניהול רחפנים" removes that model's column everywhere next render.
   const liveModels = Array.from(new Set(
-    droneDetails.map(d => toMatrixModel(d.model)).filter((m): m is string => m !== null)
+    droneDetails
+      .filter(d => d.isActive !== false)
+      .map(d => toMatrixModel(d.model))
+      .filter((m): m is string => m !== null)
   ))
   const activeModels: string[] = liveModels.length > 0
     ? MATRIX_MODELS.filter(m => liveModels.includes(m))
@@ -1478,7 +1504,9 @@ export default function AdminDashboard() {
     curMinutes: number
     prevMinutes: number
   }
-  const controlRows: ControlRow[] = db.pilots.map(p => {
+  // Monthly control: only active pilots. Retired pilots stay in history and
+  // rankings but drop out of the current-operations control view.
+  const controlRows: ControlRow[] = db.pilots.filter(p => p.isActive !== false).map(p => {
     const required = requiredModelsFor(p)
     const cur = ctrlCur[p.id] ?? {}
     const prev = ctrlPrev[p.id] ?? {}
@@ -1538,9 +1566,13 @@ export default function AdminDashboard() {
   }
 
   const maxDroneMins = Math.max(...DRONES.map(d => droneTotalMins[d.tailNumber] ?? 0), 1)
-  const dronesForSelect: DroneInfo[] = droneDetails.length > 0
+  // Dropdown-facing lists exclude RETIRED drones/pilots (isActive === false).
+  // History tables keep the full list so retired entries stay visible there.
+  const dronesForSelect: DroneInfo[] = (droneDetails.length > 0
     ? droneDetails
-    : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))
+    : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null, isActive: true })))
+    .filter(d => d.isActive !== false)
+  const activePilots: Pilot[] = db.pilots.filter(p => p.isActive !== false)
 
 
   const handleAddFlight = async () => {
@@ -1677,10 +1709,24 @@ export default function AdminDashboard() {
   }
 
   const handleDeletePilot = async (id: string) => {
+    // Soft delete: API sets is_active=false. Reflect that in local state so
+    // the pilot immediately moves to the "not active" visual + drops out of
+    // dropdowns and matrices without re-fetching.
     const res = await fetch(`/api/pilots?id=${id}`, { method: 'DELETE' })
     if (!res.ok) { alert('שגיאה במחיקת טייס'); return }
-    setDb(prev => prev ? { ...prev, pilots: prev.pilots.filter(p => p.id !== id) } : prev)
+    setDb(prev => prev ? { ...prev, pilots: prev.pilots.map(p => p.id === id ? { ...p, isActive: false } : p) } : prev)
     setConfirmPilotId(null)
+    fetchDB()
+  }
+
+  // Flip a retired pilot back to active (PUT with { id, isActive: true }).
+  const handleReactivatePilot = async (id: string) => {
+    const res = await fetch('/api/pilots', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isActive: true }),
+    })
+    if (!res.ok) { alert('שגיאה בהפעלת טייס'); return }
+    setDb(prev => prev ? { ...prev, pilots: prev.pilots.map(p => p.id === id ? { ...p, isActive: true } : p) } : prev)
     fetchDB()
   }
 
@@ -1703,13 +1749,25 @@ export default function AdminDashboard() {
   }
 
   const handleDeleteDrone = async (tailNumber: string) => {
+    // Soft delete: API sets is_active=false. Historic flights keep their drone
+    // reference and totals still include them.
     const res = await fetch(`/api/drones?tailNumber=${encodeURIComponent(tailNumber)}`, { method: 'DELETE' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      alert(err.error === 'drone_not_found' ? 'הרחפן לא נמצא במסד הנתונים' : `שגיאה במחיקת רחפן: ${err.error ?? res.status}`)
+      alert(err.error === 'drone_not_found' ? 'הרחפן לא נמצא במסד הנתונים' : `שגיאה בהשבתת רחפן: ${err.error ?? res.status}`)
       return
     }
     setConfirmDeleteDroneId(null)
+    fetchDroneData()
+  }
+
+  // Reactivate a retired drone.
+  const handleReactivateDrone = async (tailNumber: string) => {
+    const res = await fetch('/api/drones', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tailNumber, isActive: true }),
+    })
+    if (!res.ok) { alert('שגיאה בהפעלת רחפן'); return }
     fetchDroneData()
   }
 
@@ -2296,21 +2354,22 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             </h2>
           </div>
           <div className="p-4 space-y-2" dir="rtl">
-            {BATTALIONS.map(bn => {
+            {BATTALION_BUCKETS.map(bn => {
               const count = battalionCounts[bn] ?? 0
               const pct = maxBattalionCount > 0 ? (count / maxBattalionCount) * 100 : 0
               const isOpen = expandedBattalion === bn
               const monthlyData = Object.entries(battalionMonthlyMissions[bn] ?? {}).sort()
               const ytdTotal = monthlyData.reduce((s, [, ms]) => s + ms.length, 0)
+              const isNoBn = bn === NO_BATTALION_LABEL
               return (
                 <div key={bn}>
                   {/* Clickable bar row */}
                   <button
                     onClick={() => setExpandedBattalion(isOpen ? null : bn)}
-                    className={`w-full text-right bg-slate-700/40 border ${isOpen ? 'border-blue-500/50 bg-slate-700/60' : 'border-slate-600/30'} rounded-xl px-4 py-3 transition-all active:scale-[0.99]`}
+                    className={`w-full text-right bg-slate-700/40 border ${isOpen ? 'border-blue-500/50 bg-slate-700/60' : (isNoBn ? 'border-amber-700/40' : 'border-slate-600/30')} rounded-xl px-4 py-3 transition-all active:scale-[0.99]`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-300 w-28 shrink-0 text-right leading-tight">{bn}</span>
+                      <span className={`text-xs w-28 shrink-0 text-right leading-tight ${isNoBn ? 'text-amber-300/90' : 'text-slate-300'}`}>{bn}</span>
                       <div className="flex-1 h-3 bg-slate-600/50 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700"
@@ -2551,7 +2610,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
               {/* Mobile: expandable pilot cards */}
               <div className="sm:hidden divide-y divide-slate-700/30" dir="rtl">
-                {db.pilots.map(pilot => {
+                {activePilots.map(pilot => {
                   const isExpanded = expandedPilot === pilot.id
                   const required = pilotActiveRequired(pilot)
                   const monthlyOverride = !!pilot.monthlyOverrides?.[thisMonth]
@@ -2714,7 +2773,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
-                    {db.pilots.map(pilot => {
+                    {activePilots.map(pilot => {
                       const monthlyOverride = !!pilot.monthlyOverrides?.[thisMonth]
                       return (
                       <tr key={pilot.id} className="hover:bg-slate-700/20 transition-colors">
@@ -3045,7 +3104,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <label className={labelCls}>טייס</label>
                 <select value={addForm.pilotId} onChange={e => setAddForm(f => ({ ...f, pilotId: e.target.value }))} className={inputCls}>
                   <option value="">בחר טייס...</option>
-                  {db.pilots.map(p => <option key={p.id} value={p.id}>{p.name} — {p.license}</option>)}
+                  {activePilots.map(p => <option key={p.id} value={p.id}>{p.name} — {p.license}</option>)}
                 </select>
               </div>
               <div>
@@ -3556,7 +3615,8 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     const override = (p.qualificationOverride as QualificationLight | null | undefined) ?? null
                     return { light: override ?? auto, flown, total, isOverride: !!override, required }
                   }
-                  const sortedPilots = [...db.pilots].sort((a, b) => a.name.localeCompare(b.name))
+                  // Qualification map: active pilots only.
+                  const sortedPilots = [...db.pilots].filter(p => p.isActive !== false).sort((a, b) => a.name.localeCompare(b.name))
                   return (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {sortedPilots.map(p => {
@@ -3616,20 +3676,26 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
-                    {db.pilots.map((p, i) => {
+                    {[...db.pilots].sort((a, b) => Number(a.isActive === false) - Number(b.isActive === false)).map((p, i) => {
                       const pFlights = db.flights.filter(f => f.pilotId === p.id)
                       const totalMins = pFlights.reduce((a, f) => a + f.duration, 0)
                       const lastDate = pFlights.sort((a, b) => b.date.localeCompare(a.date))[0]?.date
                       const isAdmin = p.name === ADMIN_NAME || p.isAdmin === true
+                      const isInactive = p.isActive === false
                       return (
-                        <tr key={p.id} className="hover:bg-slate-700/20 transition-colors">
+                        <tr key={p.id} className={`transition-colors ${isInactive ? 'bg-slate-900/40 hover:bg-slate-900/60 opacity-70' : 'hover:bg-slate-700/20'}`}>
                           <td className="px-5 py-4 text-xs text-slate-500">{i + 1}</td>
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-700/40 flex items-center justify-center text-xs font-bold text-blue-400 flex-shrink-0">
+                              <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold flex-shrink-0 ${isInactive ? 'bg-slate-600/20 border-slate-500/40 text-slate-400' : 'bg-blue-600/20 border-blue-700/40 text-blue-400'}`}>
                                 {p.name[0]}
                               </div>
-                              <span className="text-sm font-medium text-white">{p.name}</span>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-sm font-medium ${isInactive ? 'text-slate-400 line-through' : 'text-white'}`}>{p.name}</span>
+                                {isInactive && (
+                                  <span className="text-[10px] bg-slate-800 border border-slate-600/50 text-slate-400 px-1.5 py-0.5 rounded">לא פעיל</span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-5 py-4">
@@ -3674,18 +3740,31 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                       d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                   </svg>
                                 </button>
-                                <button
-                                  onClick={() => { if (!isAdmin) setConfirmPilotId(p.id) }}
-                                  disabled={isAdmin}
-                                  title={isAdmin ? 'לא ניתן למחוק מפקד' : 'מחיקה'}
-                                  className={`p-1.5 rounded-lg transition-colors
-                                    ${isAdmin ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-red-400 hover:bg-red-900/20'}`}
-                                >
-                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
+                                {isInactive ? (
+                                  <button
+                                    onClick={() => handleReactivatePilot(p.id)}
+                                    title="הפעל מחדש"
+                                    className="p-1.5 rounded-lg transition-colors text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => { if (!isAdmin) setConfirmPilotId(p.id) }}
+                                    disabled={isAdmin}
+                                    title={isAdmin ? 'לא ניתן להשבית מפקד' : 'השבתה (נשמר בהיסטוריה)'}
+                                    className={`p-1.5 rounded-lg transition-colors
+                                      ${isAdmin ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-red-400 hover:bg-red-900/20'}`}
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                )}
                               </div>
                             </td>
                           )}
@@ -3810,7 +3889,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     </tr>
                   </thead>
                   <tbody>
-                    {(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null }))).map(drone => {
+                    {[...(droneDetails.length > 0 ? droneDetails : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model, weightKg: d.weightKg ?? null, serialNumber: d.serialNumber ?? '', extraRegistration: d.extraReg ?? null, isActive: true })))].sort((a, b) => Number(a.isActive === false) - Number(b.isActive === false)).map(drone => {
                       const dFlights = db.flights.filter(f => f.tailNumber === drone.tailNumber)
                       const totalMins = dFlights.reduce((a: number, f: Flight) => a + f.duration, 0)
                       const trainingMins = dFlights.reduce((a: number, f: Flight) => a + (isFlightTraining(f) ? f.duration : 0), 0)
@@ -3818,11 +3897,17 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                       const lastDate = [...dFlights].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
                       const batteries = droneBatteries.filter(b => b.droneTailNumber === drone.tailNumber)
                       const isExpanded = expandedDrone === drone.tailNumber
+                      const isInactive = drone.isActive === false
                       return (
                         <>
-                          <tr key={drone.tailNumber} className={`border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors ${isExpanded ? 'bg-slate-700/30' : ''}`}>
+                          <tr key={drone.tailNumber} className={`border-b border-slate-700/30 transition-colors ${isInactive ? 'bg-slate-900/40 opacity-70 hover:bg-slate-900/60' : (isExpanded ? 'bg-slate-700/30' : 'hover:bg-slate-700/20')}`}>
                             <td className="px-4 py-3">
-                              <span className="text-sm font-medium text-white">{drone.model}</span>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-sm font-medium ${isInactive ? 'text-slate-400 line-through' : 'text-white'}`}>{drone.model}</span>
+                                {isInactive && (
+                                  <span className="text-[10px] bg-slate-800 border border-slate-600/50 text-slate-400 px-1.5 py-0.5 rounded">לא פעיל</span>
+                                )}
+                              </div>
                               {drone.extraRegistration && (
                                 <span className="block text-xs text-slate-500 font-mono mt-0.5">{drone.extraRegistration}</span>
                               )}
@@ -3861,14 +3946,24 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                   >
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                   </button>
-                                  {/* Delete drone */}
-                                  <button
-                                    onClick={() => setConfirmDeleteDroneId(drone.tailNumber)}
-                                    className="text-xs text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2.5 py-1.5 rounded-lg transition-all"
-                                    title="מחיקה"
-                                  >
-                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                  </button>
+                                  {/* Retire / reactivate drone (soft delete) */}
+                                  {drone.isActive === false ? (
+                                    <button
+                                      onClick={() => handleReactivateDrone(drone.tailNumber)}
+                                      className="text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-700/30 px-2.5 py-1.5 rounded-lg transition-all"
+                                      title="הפעל מחדש"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => setConfirmDeleteDroneId(drone.tailNumber)}
+                                      className="text-xs text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2.5 py-1.5 rounded-lg transition-all"
+                                      title="השבתה (נשמר בהיסטוריה)"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    </button>
+                                  )}
                                   {/* Batteries toggle */}
                                   <button
                                     onClick={() => setExpandedDrone(isExpanded ? null : drone.tailNumber)}
