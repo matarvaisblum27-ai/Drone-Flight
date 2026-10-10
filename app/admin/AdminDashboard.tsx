@@ -2358,7 +2358,10 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               const count = battalionCounts[bn] ?? 0
               const pct = maxBattalionCount > 0 ? (count / maxBattalionCount) * 100 : 0
               const isOpen = expandedBattalion === bn
-              const monthlyData = Object.entries(battalionMonthlyMissions[bn] ?? {}).sort()
+              // Newest months first so recent activity sits at the top of the drill-down
+              // (used to be ascending → July/August/September pushed below the max-height
+              // clip and disappeared from view).
+              const monthlyData = Object.entries(battalionMonthlyMissions[bn] ?? {}).sort((a, b) => b[0].localeCompare(a[0]))
               const ytdTotal = monthlyData.reduce((s, [, ms]) => s + ms.length, 0)
               const isNoBn = bn === NO_BATTALION_LABEL
               return (
@@ -2386,7 +2389,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   {/* Expandable monthly breakdown */}
                   <div
                     className="overflow-hidden transition-all duration-300 ease-in-out"
-                    style={{ maxHeight: isOpen ? '4000px' : '0px', opacity: isOpen ? 1 : 0 }}
+                    style={{ maxHeight: isOpen ? '50000px' : '0px', opacity: isOpen ? 1 : 0 }}
                   >
                     <div className="mt-2 bg-slate-900/60 border border-slate-700/40 rounded-xl p-4" dir="rtl">
                       {monthlyData.length === 0 ? (
