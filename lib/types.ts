@@ -12,6 +12,9 @@ export interface Pilot {
   /** Admin manual override of monthly completion. Keyed by "YYYY-MM" month tag,
    *  true means "pilot marked as having completed all required flights for that month". */
   monthlyOverrides?: Record<string, boolean>
+  /** Soft-delete flag. false = retired pilot: hidden from dropdowns and current
+   *  pickers but still visible in history and historic stats. */
+  isActive?: boolean
 }
 
 export interface Mission {
@@ -77,6 +80,9 @@ export interface DroneInfo {
   weightKg: number | null
   serialNumber: string
   extraRegistration: string | null
+  /** Soft-delete flag. false = retired drone: hidden from dropdowns and the
+   *  active fleet matrices but still counted in history. */
+  isActive?: boolean
 }
 
 export interface GasDrop {

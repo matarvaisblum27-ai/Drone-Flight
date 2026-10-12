@@ -496,11 +496,19 @@ export default function PilotDashboard() {
 
   // Prefer the live DB list; fall back to the hard-coded list on first render
   // (before the fetch resolves) or if the API is temporarily unavailable.
-  const availableDrones: { tailNumber: string; model: string }[] = allDrones.length > 0
+  // Only drones with isActive !== false are offered for new flights. Retired
+  // ones are kept in the lookup map so historical flights still render with
+  // the correct model name.
+  const activeDroneList = allDrones.filter(d => d.isActive !== false)
+  const availableDrones: { tailNumber: string; model: string }[] = activeDroneList.length > 0
+    ? activeDroneList.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
+    : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
+  // Lookup includes BOTH active and retired drones so historical cards show the model.
+  const lookupDrones: { tailNumber: string; model: string }[] = allDrones.length > 0
     ? allDrones.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
     : DRONES.map(d => ({ tailNumber: d.tailNumber, model: d.model }))
   const droneLabelDynamic = (tail: string): string => {
-    const d = availableDrones.find(x => x.tailNumber === tail)
+    const d = lookupDrones.find(x => x.tailNumber.toLowerCase() === tail.toLowerCase())
     return d ? `${d.model} | ${tail}` : droneLabel(tail)
   }
 

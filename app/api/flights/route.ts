@@ -92,7 +92,12 @@ export async function GET(req: NextRequest) {
   if (authError) return authError
 
   const [pilotsRes, flightsRes, migrated] = await Promise.all([
-    supabase.from('pilots').select('id,name,license,is_admin').order('name'),
+    // qualification_override + required_drone_models MUST be included: the admin
+    // dashboard reads its pilot list from here, and dropping them made every
+    // pilot look unconfigured again after each refresh.
+    supabase.from('pilots')
+      .select('id,name,license,is_admin,qualification_override,required_drone_models,monthly_overrides,is_active')
+      .order('name'),
     fetchAllFlights(),
     hasMigration(),
   ])
@@ -101,7 +106,26 @@ export async function GET(req: NextRequest) {
   if (flightsRes.error) return NextResponse.json({ error: flightsRes.error.message }, { status: 500 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapPilot = (row: any) => ({ id: row.id, name: row.name, license: row.license, isAdmin: row.is_admin ?? false })
+  const mapPilot = (row: any) => {
+    // monthly_overrides is JSONB, usually an object. Collect only valid "YYYY-MM" boolean entries.
+    let monthlyOverrides: Record<string, boolean> = {}
+    if (row.monthly_overrides && typeof row.monthly_overrides === 'object' && !Array.isArray(row.monthly_overrides)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Object.entries(row.monthly_overrides as Record<string, any>).forEach(([k, v]) => {
+        if (/^\d{4}-\d{2}$/.test(k)) monthlyOverrides[k] = !!v
+      })
+    }
+    return {
+      id:      row.id,
+      name:    row.name,
+      license: row.license,
+      isAdmin: row.is_admin ?? false,
+      qualificationOverride: row.qualification_override ?? null,
+      requiredDroneModels:   parseArray(row.required_drone_models),
+      monthlyOverrides,
+      isActive: row.is_active ?? true,
+    }
+  }
 
   const db: FlightDB = {
     pilots:          pilotsRes.data.map(mapPilot),

@@ -39,13 +39,14 @@ function rowToPilot(row: any): Pilot {
     qualificationOverride: row.qualification_override ?? null,
     requiredDroneModels: parseModels(row.required_drone_models),
     monthlyOverrides: parseMonthlyOverrides(row.monthly_overrides),
+    isActive: row.is_active ?? true,
   }
 }
 
 export async function GET() {
   const { data, error } = await supabase
     .from('pilots')
-    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides, is_active')
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json((data ?? []).map(rowToPilot))
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('pilots')
     .insert({ id: `p${Date.now()}`, name, license, password_hash, is_admin: false })
-    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides, is_active')
     .single()
 
   if (error) {
@@ -90,7 +91,7 @@ export async function PUT(req: NextRequest) {
     body.id &&
     body.name === undefined &&
     body.license === undefined &&
-    (body.qualificationOverride !== undefined || body.requiredDroneModels !== undefined || body.monthlyOverrideMonth !== undefined)
+    (body.qualificationOverride !== undefined || body.requiredDroneModels !== undefined || body.monthlyOverrideMonth !== undefined || body.isActive !== undefined)
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const partialUpdates: Record<string, any> = {}
@@ -131,11 +132,16 @@ export async function PUT(req: NextRequest) {
       partialUpdates.monthly_overrides = current
     }
 
+    // Toggle the soft-delete flag — admin "retire" / "reactivate" from UI.
+    if (body.isActive !== undefined) {
+      partialUpdates.is_active = !!body.isActive
+    }
+
     const { data, error } = await supabase
       .from('pilots')
       .update(partialUpdates)
       .eq('id', body.id)
-      .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
+      .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides, is_active')
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(rowToPilot(data))
@@ -188,7 +194,7 @@ export async function PUT(req: NextRequest) {
     .from('pilots')
     .update(updates)
     .eq('id', body.id)
-    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides')
+    .select('id, name, license, is_admin, qualification_override, required_drone_models, monthly_overrides, is_active')
     .single()
   console.log('[PUT /api/pilots] Supabase result:', { data: data ? { name: data.name, is_admin: data.is_admin } : null, error: error?.message })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -199,6 +205,9 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json(rowToPilot(data))
 }
 
+// Soft delete: DELETE now sets is_active=false instead of removing the pilot
+// row. Historical flights keep showing the pilot name and totals still count.
+// The pilot stops appearing in dropdowns, qualification map, and monthly matrix.
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
@@ -214,7 +223,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'cannot delete admin' }, { status: 403 })
   }
 
-  const { error } = await supabase.from('pilots').delete().eq('id', id)
+  const { error } = await supabase.from('pilots').update({ is_active: false }).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }

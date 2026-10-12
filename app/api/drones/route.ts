@@ -28,24 +28,27 @@ function rowToDrone(row: any): DroneInfo {
     weightKg:          row.weight != null ? Number(row.weight) : null,
     serialNumber:      row.serial_number ?? '',
     extraRegistration: row.extra_registration ?? null,
+    isActive:          row.is_active ?? true,
   }
 }
 
 export async function GET(req: NextRequest) {
   const { error: authError } = await requireSession(req)
   if (authError) return authError
+  // GET returns BOTH active and inactive drones; the client filters by isActive
+  // for current operations (dropdowns, matrices) and shows retired ones in the
+  // records / history views with a "לא פעיל" tag.
   const { data, error } = await supabase.from('drones').select('*').order('model_name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const CACHE = { headers: { 'Cache-Control': 'private, max-age=180, stale-while-revalidate=60' } }
-
+  // No cache header: isActive changes must be reflected immediately.
   if (data.length === 0) {
     const { data: seeded, error: seedErr } = await supabase.from('drones').insert(INITIAL_DRONES).select()
     if (seedErr) return NextResponse.json({ error: seedErr.message }, { status: 500 })
-    return NextResponse.json(seeded.map(rowToDrone), CACHE)
+    return NextResponse.json(seeded.map(rowToDrone))
   }
 
-  return NextResponse.json(data.map(rowToDrone), CACHE)
+  return NextResponse.json(data.map(rowToDrone))
 }
 
 export async function POST(req: NextRequest) {
@@ -75,37 +78,64 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(rowToDrone(data), { status: 201 })
 }
 
+// Soft delete: DELETE now sets is_active=false instead of removing the row,
+// so historic flights keep their drone reference and totals still include them.
 export async function DELETE(req: NextRequest) {
   const { error: authError } = await requireSession(req)
   if (authError) return authError
   const tailNumber = req.nextUrl.searchParams.get('tailNumber')
   if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
 
-  const { error, count } = await supabase
+  const { data, error } = await supabase
     .from('drones')
-    .delete({ count: 'exact' })
+    .update({ is_active: false })
     .eq('tail_number', tailNumber)
+    .select()
+    .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (count === 0) return NextResponse.json({ error: 'drone_not_found' }, { status: 404 })
-  return NextResponse.json({ ok: true })
+  if (!data) return NextResponse.json({ error: 'drone_not_found' }, { status: 404 })
+  return NextResponse.json({ ok: true, drone: rowToDrone(data) })
 }
 
 export async function PUT(req: NextRequest) {
   const { error: authError } = await requireSession(req)
   if (authError) return authError
   const body = await req.json()
-  const { tailNumber, model, weightKg, serialNumber, extraRegistration } = body
+  const { tailNumber, model, weightKg, serialNumber, extraRegistration, isActive } = body
   if (!tailNumber) return NextResponse.json({ error: 'tailNumber required' }, { status: 400 })
+
+  // Reactivation path: PUT with just { tailNumber, isActive: true } flips the
+  // soft-delete flag without touching other fields.
+  if (
+    isActive !== undefined &&
+    model === undefined &&
+    weightKg === undefined &&
+    serialNumber === undefined &&
+    extraRegistration === undefined
+  ) {
+    const { data, error } = await supabase
+      .from('drones')
+      .update({ is_active: !!isActive })
+      .eq('tail_number', tailNumber)
+      .select()
+      .single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json(rowToDrone(data))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = {
+    model_name:         model,
+    weight:             weightKg != null ? String(weightKg) : null,
+    serial_number:      serialNumber ?? '',
+    extra_registration: extraRegistration || null,
+  }
+  if (isActive !== undefined) updates.is_active = !!isActive
 
   const { data, error } = await supabase
     .from('drones')
-    .update({
-      model_name:         model,
-      weight:             weightKg != null ? String(weightKg) : null,
-      serial_number:      serialNumber ?? '',
-      extra_registration: extraRegistration || null,
-    })
+    .update(updates)
     .eq('tail_number', tailNumber)
     .select()
     .single()
