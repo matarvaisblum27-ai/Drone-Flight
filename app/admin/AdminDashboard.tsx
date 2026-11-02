@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, QualificationLight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
+import { ThemeToggle } from '@/components/ThemeProvider'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -2037,6 +2038,8 @@ export default function AdminDashboard() {
                 דשבורד אישי
               </a>
             )}
+            {/* Day/night toggle — remembered per device */}
+            <ThemeToggle />
             <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location.href = '/')}
               className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
               יציאה

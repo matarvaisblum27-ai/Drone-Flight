@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { FlightDB, DroneBattery, DroneInfo, Mission, Flight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
+import { ThemeToggle } from '@/components/ThemeProvider'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'מודיעין', 'כללי']
 
@@ -807,6 +808,8 @@ export default function PilotDashboard() {
               </p>
             </div>
           </div>
+          {/* Day/night toggle — remembered per device so operators keep night mode in the field */}
+          <ThemeToggle />
           <button
             onClick={() => setShowChangePwd(true)}
             className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
