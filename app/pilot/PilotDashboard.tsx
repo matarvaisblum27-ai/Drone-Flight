@@ -5,6 +5,10 @@ import { FlightDB, DroneBattery, DroneInfo, Mission, Flight, isFlightComplete, m
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 import { ThemeToggle } from '@/components/ThemeProvider'
+import {
+  GlassPanel, KpiTile, GlassButton, StatusDot, SectionHeader,
+  NavDock, TopBar, Chip, AnimatedCounter,
+} from '@/components/magav'
 
 const BATTALIONS = ['גדוד אדומים', 'גדוד צפוני', 'גדוד דרומי', 'מודיעין', 'כללי']
 
@@ -74,7 +78,7 @@ function TwoStepDeleteDialog({ onConfirm, onCancel }: {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
-        <div className="relative bg-slate-800 border border-slate-700/50 rounded-2xl p-6 w-full max-w-xs shadow-2xl">
+        <div className="relative glass rounded-2xl p-6 w-full max-w-xs shadow-2xl">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-9 h-9 rounded-full bg-slate-700 border border-slate-600/60 flex items-center justify-center flex-shrink-0">
               <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -180,7 +184,7 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+  const inputCls = 'w-full field rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
@@ -341,7 +345,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+  const cls = 'w-full field rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
 
   const handleSave = async () => {
     if (!current || !next || !confirm) { setError('יש למלא את כל השדות'); return }
@@ -767,7 +771,7 @@ export default function PilotDashboard() {
     fetchDB()
   }
 
-  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
+  const inputCls = 'w-full field rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   // Preview = total duration across every valid takeoff/landing segment.
@@ -794,83 +798,124 @@ export default function PilotDashboard() {
         />
       )}
 
-      {/* Header */}
-      <header className="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 sticky top-0 z-30">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-sm font-bold text-blue-400">
-              {userName[0]}
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white">{userName}</h1>
-              <p className="text-xs text-slate-500">
-                {pilot ? `רישיון ${pilot.license}` : 'טייס רחפן'}
-              </p>
-            </div>
-          </div>
-          {/* Day/night toggle — remembered per device so operators keep night mode in the field */}
-          <ThemeToggle />
-          <button
-            onClick={() => setShowChangePwd(true)}
-            className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
-          >
-            שנה סיסמה
-          </button>
-          <button
-            onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/'))}
-            className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all"
-          >
-            יציאה
-          </button>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Personal stat cards */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-            <p className="text-xs text-slate-400 mb-3">סה&quot;כ שעות</p>
-            <p className="text-2xl font-bold text-blue-400">{fmtHours(totalMinutes)}</p>
-            <p className="text-xs text-slate-500 mt-1">{Math.floor(totalMinutes / 60)}:{String(totalMinutes % 60).padStart(2,'0')} שעות</p>
-          </div>
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-            <p className="text-xs text-slate-400 mb-3">סה&quot;כ משימות</p>
-            <p className="text-2xl font-bold text-indigo-400">{myFlights.length}</p>
-            <p className="text-xs text-slate-500 mt-1">טיסות רשומות</p>
-          </div>
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
-            <p className="text-xs text-slate-400 mb-3">משימה אחרונה</p>
-            <p className="text-2xl font-bold text-violet-400">{lastFlight ? fmtHours(lastFlight.duration) : '—'}</p>
-            <p className="text-xs text-slate-500 mt-1">
-              {lastFlight ? new Date(lastFlight.date).toLocaleDateString('he-IL') : 'אין נתונים'}
-            </p>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1">
-          {([
-            { key: 'stats', label: 'סטטיסטיקות', icon: '📊' },
-            { key: 'add', label: 'רישום טיסה', icon: '✈️' },
-            { key: 'history', label: 'היסטוריה', icon: '📜' },
-          ] as const).map(({ key, label, icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${activeTab === key ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+      {/* ─── Night Ops TopBar ─── */}
+      <TopBar
+        title={userName}
+        subtitle={pilot ? `רישיון ${pilot.license}` : 'טייס רחפן'}
+        initial={userName[0]}
+        liveStatus="ok"
+        rightSlot={
+          <>
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowChangePwd(true)}
             >
-              <span>{icon}</span>
-              {label}
-            </button>
-          ))}
+              שנה סיסמה
+            </GlassButton>
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/'))}
+            >
+              יציאה
+            </GlassButton>
+          </>
+        }
+      />
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8 pb-28 enter-up">
+        {/* ─── HERO: huge total hours display ─── */}
+        <GlassPanel padding="lg" className="relative overflow-hidden">
+          <div className="flex items-start justify-between gap-6">
+            <div className="min-w-0 flex-1">
+              <div className="label-micro mb-3">סה״כ שעות טיסה</div>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-display text-6xl sm:text-7xl text-white leading-none">
+                  <AnimatedCounter value={Math.floor(totalMinutes / 60)} />
+                </span>
+                <span className="font-display text-3xl sm:text-4xl leading-none" style={{ color: 'rgb(var(--emerald))' }}>
+                  :{String(totalMinutes % 60).padStart(2, '0')}
+                </span>
+                <span className="label-micro mb-1">שעות</span>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Chip tone="brand" icon={<StatusDot tone="ok" size="xs" />}>
+                  פעיל במערכת
+                </Chip>
+                {lastFlight && (
+                  <Chip tone="default">
+                    טיסה אחרונה · {new Date(lastFlight.date).toLocaleDateString('he-IL')}
+                  </Chip>
+                )}
+              </div>
+            </div>
+            {/* Decorative rotating ring in the corner */}
+            <div className="hidden sm:block relative shrink-0" aria-hidden>
+              <svg width="120" height="120" viewBox="0 0 120 120" className="opacity-70">
+                <defs>
+                  <linearGradient id="pilotRing" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="rgb(46,229,157)" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="rgb(0,106,78)" stopOpacity="0.3" />
+                  </linearGradient>
+                </defs>
+                <circle cx="60" cy="60" r="52" fill="none" stroke="url(#pilotRing)" strokeWidth="2" strokeDasharray="6 4" />
+                <circle cx="60" cy="60" r="40" fill="none" stroke="rgb(46,229,157)" strokeOpacity="0.3" strokeWidth="1" />
+                <circle cx="60" cy="60" r="4" fill="rgb(46,229,157)" />
+              </svg>
+            </div>
+          </div>
+        </GlassPanel>
+
+        {/* ─── 3 KPI tiles ─── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+          <KpiTile
+            label="סה״כ טיסות"
+            value={myFlights.length}
+            footnote="טיסות רשומות"
+          />
+          <KpiTile
+            label="משימה אחרונה"
+            value={lastFlight ? fmtHours(lastFlight.duration) : '—'}
+            animated={false}
+            footnote={lastFlight ? new Date(lastFlight.date).toLocaleDateString('he-IL') : 'אין נתונים'}
+            tone="emerald"
+          />
+          <KpiTile
+            label="דקות מצטברות"
+            value={totalMinutes}
+            unit="דק׳"
+            footnote="כל הזמנים"
+            className="col-span-2 sm:col-span-1"
+          />
         </div>
+
+        {/* ─── NavDock inline (above fold on desktop) ─── */}
+        <NavDock
+          variant="inline"
+          active={activeTab}
+          onSelect={(k) => setActiveTab(k as typeof activeTab)}
+          items={[
+            { key: 'stats',   label: 'סטטיסטיקות', icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                <path d="M3 20h18M7 16V9M12 16V5M17 16v-7" strokeLinecap="round"/>
+              </svg>) },
+            { key: 'add',     label: 'רישום טיסה', icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                <path d="M12 5v14M5 12h14" strokeLinecap="round"/>
+              </svg>) },
+            { key: 'history', label: 'היסטוריה',  icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                <path d="M3 12a9 9 0 1 0 2.5-6.2M3 4v4h4M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>) },
+          ]}
+        />
 
         {/* STATS TAB */}
         {activeTab === 'stats' && (
           <div className="space-y-5">
             {/* Flight activity chart */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+            <div className="glass p-6">
               <h2 className="text-sm font-semibold text-white mb-5">פעילות לפי חודש</h2>
               {(() => {
                 const monthMap: Record<string, number> = {}
@@ -905,7 +950,7 @@ export default function PilotDashboard() {
 
             {/* Last 3 flights */}
             {myFlights.length > 0 && (
-              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+              <div className="glass p-6">
                 <h2 className="text-sm font-semibold text-white mb-4">טיסות אחרונות</h2>
                 <div className="space-y-3">
                   {myFlights.slice(0, 3).map(f => (
@@ -973,7 +1018,7 @@ export default function PilotDashboard() {
               // Training mode bypasses the existing-mission dropdown — always show the create-new fields.
               const isCreatingNew = missionForm.isTraining || !showDropdown || missionPick === 'new'
               return (
-              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+              <div className="glass p-6">
                 <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
                   <span className="text-indigo-400">📋</span> שלב 1 — פרטי המשימה
                 </h2>
@@ -1122,7 +1167,7 @@ export default function PilotDashboard() {
 
             {/* Step 2: Flight details */}
             {addStep === 'flight' && selectedMission && (
-              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6">
+              <div className="glass p-6">
                 {/* Mission banner */}
                 <div className="bg-indigo-900/30 border border-indigo-700/40 rounded-xl px-4 py-3 mb-5 flex items-center gap-3">
                   <span className="text-indigo-400 text-lg">📋</span>
@@ -1308,14 +1353,14 @@ export default function PilotDashboard() {
         {/* HISTORY TAB */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl px-6 py-4 flex items-center justify-between">
+            <div className="glass px-6 py-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span className="text-blue-400">📜</span> היסטוריית טיסות שלי
               </h2>
               <span className="text-xs text-slate-400">{myFlights.length} טיסות</span>
             </div>
             {myFlights.length === 0 ? (
-              <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-12 text-center">
+              <div className="glass p-12 text-center">
                 <div className="text-4xl mb-3">✈️</div>
                 <p className="text-slate-400">אין טיסות רשומות עדיין</p>
                 <button onClick={() => setActiveTab('add')}

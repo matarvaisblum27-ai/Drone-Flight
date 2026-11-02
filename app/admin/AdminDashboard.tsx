@@ -3,6 +3,10 @@ import { useEffect, useState, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { FlightDB, Flight, Pilot, PilotStats, DroneInfo, DroneBattery, GasDrop, Mission, QualificationLight, isFlightComplete, missingFields, isTrainingName } from '@/lib/types'
 import { ThemeToggle } from '@/components/ThemeProvider'
+import {
+  GlassPanel, KpiTile, GlassButton, StatusDot, SectionHeader,
+  NavDock, TopBar, Chip, AnimatedCounter,
+} from '@/components/magav'
 import { DRONES, droneLabel } from '@/lib/drones'
 import { useInactivityLogout } from '@/lib/useInactivityLogout'
 
@@ -340,7 +344,7 @@ function EditModal({ flight, db, onSave, onCancel, drones, batteries }: {
   const [error, setError] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
 
-  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+  const inputCls = 'w-full field rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
@@ -707,7 +711,7 @@ function PilotEditModal({ pilot, onSave, onCancel, canManageAdmin }: {
   const isAdd = pilot === null
   const isFixedAdmin = pilot?.name === ADMIN_FIXED_NAME
 
-  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
+  const inputCls = 'w-full field rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   const handleSave = () => {
@@ -804,7 +808,7 @@ function DroneEditModal({ drone, onSave, onCancel }: {
     serialNumber:      drone?.serialNumber ?? '',
     extraRegistration: drone?.extraRegistration ?? '',
   })
-  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const cls = 'w-full field rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
   const [showConfirm, setShowConfirm] = useState(false)
   const droneData = {
     tailNumber: form.tailNumber.trim(),
@@ -879,7 +883,7 @@ function BatteryModal({ battery, tailNumber, drones, onSave, onCancel }: {
     chargeCycle:    battery?.chargeCycle ?? '',
     inspectionDate: battery?.inspectionDate ?? '',
   })
-  const cls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const cls = 'w-full field rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
   const showDroneSelect = !tailNumber && drones && drones.length > 0
   const [showConfirm, setShowConfirm] = useState(false)
   return (
@@ -1913,7 +1917,7 @@ export default function AdminDashboard() {
       )
     : adminMissionGroups
 
-  const inputCls = 'w-full bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
+  const inputCls = 'w-full field rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
   return (
@@ -2014,39 +2018,35 @@ export default function AdminDashboard() {
       )}
 
       {/* Header */}
-      <header className="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center">
-              <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white">לוח בקרה — מפקד</h1>
-              <p className="text-xs text-slate-500">יחידת רחפנים</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-300 hidden sm:block">{currentUserName}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${canEdit ? 'bg-blue-600/20 text-blue-400 border-blue-700/40' : isViewer ? 'bg-purple-600/20 text-purple-400 border-purple-700/40' : 'bg-slate-600/20 text-slate-400 border-slate-700/40'}`}>
+      {/* ─── Night Ops Command TopBar ─── */}
+      <TopBar
+        title="לוח בקרה — מפקד"
+        subtitle={`יחידת רחפנים · ${currentUserName}`}
+        initial="מ"
+        liveStatus="ok"
+        rightSlot={
+          <>
+            <Chip
+              tone={canEdit ? 'brand' : isViewer ? 'info' : 'default'}
+              className="hidden sm:inline-flex"
+            >
               {canEdit ? 'מפקד' : isViewer ? 'סגן' : 'צפייה'}
-            </span>
+            </Chip>
             {!canEdit && (
-              <a href="/pilot"
-                className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
-                דשבורד אישי
+              <a href="/pilot">
+                <GlassButton variant="ghost" size="sm">דשבורד אישי</GlassButton>
               </a>
             )}
-            {/* Day/night toggle — remembered per device */}
-            <ThemeToggle />
-            <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location.href = '/')}
-              className="text-slate-400 hover:text-white text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 px-3 py-1.5 rounded-lg transition-all">
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location.href = '/')}
+            >
               יציאה
-            </button>
-          </div>
-        </div>
-      </header>
+            </GlassButton>
+          </>
+        }
+      />
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
@@ -2350,7 +2350,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         </div>{/* end space-y-4 */}
 
         {/* Battalion breakdown card */}
-        <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
+        <div className="glass">
           <div className="p-5 border-b border-slate-700/50">
             <h2 className="text-base font-semibold text-white flex items-center gap-2">
               <span>🎖️</span> התפלגות משימות לפי גדוד
@@ -2443,33 +2443,83 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1 overflow-x-auto">
-          {([
-            { key: 'overview',   label: 'סקירה',          icon: '📊', minLevel: 'viewer'  },
-            { key: 'control',    label: 'בקרה חודשית',     icon: '🚦', minLevel: 'viewer'  },
-            { key: 'ranking',    label: 'דירוג טייסים',    icon: '🏆', minLevel: 'viewer'  },
-            { key: 'add',        label: 'הוספת טיסה',      icon: '➕', minLevel: 'deputy'  },
-            { key: 'history',    label: 'היסטוריה',        icon: '📜', minLevel: 'viewer'  },
-            { key: 'trainings',  label: 'אימונים',         icon: '🎓', minLevel: 'viewer'  },
-            { key: 'pilots',     label: 'ניהול טייסים',    icon: '👨‍✈️', minLevel: 'viewer'  },
-            { key: 'batteries',  label: 'ניהול סוללות',    icon: '🔋', minLevel: 'viewer'  },
-            { key: 'drones',     label: 'ניהול רחפנים',    icon: '🚁', minLevel: 'viewer'  },
-            { key: 'logs',       label: 'יומן כניסות',     icon: '🔐', minLevel: 'admin'   },
-          ] as const).filter(({ minLevel }) =>
-            minLevel === 'viewer' || (minLevel === 'deputy' && canManageData) || (minLevel === 'admin' && canEdit)
-          ).map(({ key, label, icon }) => (
-            <button key={key} onClick={() => setActiveTab(key)}
-              className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
-                ${activeTab === key ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}>
-              <span>{icon}</span>{label}
-            </button>
-          ))}
-        </div>
+        {/* ─── Night Ops navigation dock (inline, horizontal scroll on phone) ─── */}
+        <NavDock
+          variant="inline"
+          active={activeTab}
+          onSelect={(k) => setActiveTab(k as typeof activeTab)}
+          items={(
+            [
+              { key: 'overview',  label: 'סקירה',        iconSvg: 'M3 20h18M7 16V9M12 16V5M17 16v-7',          minLevel: 'viewer' },
+              { key: 'control',   label: 'בקרה חודשית',  iconSvg: 'M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83', minLevel: 'viewer' },
+              { key: 'ranking',   label: 'דירוג טייסים', iconSvg: 'M8 21h8M12 17v4M7 4h10v6a5 5 0 0 1-10 0V4zM3 5v3a3 3 0 0 0 3 3M21 5v3a3 3 0 0 1-3 3', minLevel: 'viewer' },
+              { key: 'add',       label: 'הוספת טיסה',   iconSvg: 'M12 5v14M5 12h14',                           minLevel: 'deputy' },
+              { key: 'history',   label: 'היסטוריה',     iconSvg: 'M3 12a9 9 0 1 0 2.5-6.2M3 4v4h4M12 7v5l3 2', minLevel: 'viewer' },
+              { key: 'trainings', label: 'אימונים',      iconSvg: 'M22 10L12 5 2 10l10 5 10-5zM6 12v5c0 1 2 3 6 3s6-2 6-3v-5', minLevel: 'viewer' },
+              { key: 'pilots',    label: 'טייסים',       iconSvg: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75', minLevel: 'viewer' },
+              { key: 'batteries', label: 'סוללות',       iconSvg: 'M3 6h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3V6zM21 10v4',  minLevel: 'viewer' },
+              { key: 'drones',    label: 'רחפנים',       iconSvg: 'M12 2v20M2 12h20M4 4l16 16M20 4L4 20',                  minLevel: 'viewer' },
+              { key: 'logs',      label: 'יומן',         iconSvg: 'M12 15v2m0 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM19 10V7a7 7 0 0 0-14 0v3M5 10h14v11H5V10z',          minLevel: 'admin' },
+            ] as const
+          )
+            .filter(({ minLevel }) => minLevel === 'viewer' || (minLevel === 'deputy' && canManageData) || (minLevel === 'admin' && canEdit))
+            .map(({ key, label, iconSvg }) => ({
+              key,
+              label,
+              icon: (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                  <path d={iconSvg} strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ),
+            }))
+          }
+        />
 
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
-          <div className="space-y-6" onClick={() => setTooltip(null)}>
+          <div className="space-y-6 enter-up" onClick={() => setTooltip(null)}>
+            {/* ─── HERO KPI STRIP ─── */}
+            <GlassPanel padding="lg" className="relative overflow-hidden">
+              <div className="flex flex-wrap items-start justify-between gap-6">
+                <div className="min-w-0">
+                  <div className="label-micro mb-3">מצב מערכת</div>
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    <span className="font-display text-5xl sm:text-6xl text-white leading-none">
+                      <AnimatedCounter value={Math.floor(totalMinutes / 60)} />
+                    </span>
+                    <span className="font-display text-2xl sm:text-3xl leading-none" style={{ color: 'rgb(var(--emerald))' }}>
+                      :{String(totalMinutes % 60).padStart(2, '0')}
+                    </span>
+                    <span className="label-micro mb-1">שעות</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Chip tone="ok" icon={<StatusDot tone="ok" size="xs" />}>מערכת פעילה</Chip>
+                    <Chip tone="brand">{db.pilots.length} טייסים · {db.flights.length} טיסות</Chip>
+                  </div>
+                </div>
+                {/* Mini KPI grid */}
+                <div className="grid grid-cols-3 gap-3 w-full sm:w-auto">
+                  <div className="glass-flat px-4 py-3 min-w-[110px]">
+                    <div className="label-micro">החודש</div>
+                    <div className="font-display text-2xl mt-0.5 text-white"><AnimatedCounter value={missionsThisMonth} /></div>
+                    <div className="label-micro mt-0.5" style={{opacity:.7}}>משימות</div>
+                  </div>
+                  <div className="glass-flat px-4 py-3 min-w-[110px]">
+                    <div className="label-micro">השנה</div>
+                    <div className="font-display text-2xl mt-0.5 text-white"><AnimatedCounter value={missionsThisYear} /></div>
+                    <div className="label-micro mt-0.5" style={{opacity:.7}}>משימות</div>
+                  </div>
+                  <div className="glass-flat px-4 py-3 min-w-[110px]">
+                    <div className="label-micro">צי</div>
+                    <div className="font-display text-2xl mt-0.5" style={{ color: 'rgb(var(--emerald))' }}>
+                      <AnimatedCounter value={dronesForSelect.length} />
+                    </div>
+                    <div className="label-micro mt-0.5" style={{opacity:.7}}>רחפנים</div>
+                  </div>
+                </div>
+              </div>
+            </GlassPanel>
+
             {canEdit && (
               <div className="flex gap-2 justify-end flex-wrap">
                 <button
@@ -2508,7 +2558,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             )}
 
             {/* ── Section 1: Drone Summary ────────────────────────────────── */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
+            <div className="glass">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span>🚁</span> סיכום רחפנים
@@ -2607,7 +2657,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             </div>
 
             {/* ── Section 2: Pilot Training Matrix ───────────────────────── */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl">
+            <div className="glass">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span>🎓</span> סיכום אימוני טייסים
@@ -2859,7 +2909,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {activeTab === 'control' && (
           <div className="space-y-5">
             {/* Controls */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5 space-y-4">
+            <div className="glass p-5 space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-emerald-400">🚦</span> בקרה חודשית — {monthLabel(ctrlMonth)}
@@ -2880,7 +2930,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                     <button onClick={() => setCtrlMonth(shiftMonth(ctrlMonth, -1))}
                       className="px-2.5 py-2 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-white text-sm">‹</button>
                     <input type="month" value={ctrlMonth} onChange={e => e.target.value && setCtrlMonth(e.target.value)}
-                      className="bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      className="field rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <button onClick={() => setCtrlMonth(shiftMonth(ctrlMonth, 1))}
                       className="px-2.5 py-2 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-white text-sm">›</button>
                   </div>
@@ -2888,7 +2938,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">מינימום טיסות בחודש לכל כלי</label>
                   <select value={ctrlThreshold} onChange={e => setCtrlThreshold(Number(e.target.value))}
-                    className="bg-slate-700/60 border border-slate-600/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    className="field rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     {[1,2,3,4,5,6,8,10].map(n => <option key={n} value={n}>{n} טיסות</option>)}
                   </select>
                 </div>
@@ -2935,7 +2985,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             </div>
 
             {/* Matrix */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-900/50">
@@ -3047,7 +3097,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
         {/* RANKING */}
         {activeTab === 'ranking' && (
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+          <div className="glass overflow-hidden">
             <div className="p-6 border-b border-slate-700/50">
               <h2 className="text-base font-semibold text-white flex items-center gap-2">
                 <span className="text-yellow-400">🏆</span> דירוג טייסים לפי שעות טיסה מצטברות
@@ -3101,7 +3151,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
 
         {/* ADD FLIGHT */}
         {activeTab === 'add' && (
-          <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-6 max-w-2xl mx-auto">
+          <div className="glass p-6 max-w-2xl mx-auto">
             <h2 className="text-base font-semibold text-white mb-6 flex items-center gap-2">
               <span className="text-blue-400">➕</span> הוספת רשומת טיסה
             </h2>
@@ -3331,7 +3381,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* HISTORY */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl px-6 py-4 flex items-center justify-between">
+            <div className="glass px-6 py-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-white flex items-center gap-2">
                 <span className="text-blue-400">📜</span> היסטוריית טיסות
               </h2>
@@ -3497,7 +3547,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* TRAININGS */}
         {activeTab === 'trainings' && (
           <div className="space-y-5">
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl p-5">
+            <div className="glass p-5">
               {(() => {
                 // Build training groups from FLIGHTS so we catch both new (is_training=true) AND
                 // legacy missions identified by name ('אימון ...'). Group by mission key (missionId
@@ -3597,7 +3647,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             )}
 
             {/* ── Qualification traffic-light map ─────────────────────────── */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="p-5 border-b border-slate-700/50 flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-emerald-400">🚦</span> מפת כשירות טייסים
@@ -3644,7 +3694,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                                   <span className="text-[10px] bg-purple-900/40 border border-purple-700/40 text-purple-300 px-1 py-0.5 rounded">ידני</span>
                                 )}
                                 {!isConfigured && (
-                                  <span className="text-[10px] bg-slate-700/60 border border-slate-600/50 text-slate-400 px-1 py-0.5 rounded">ברירת מחדל</span>
+                                  <span className="text-[10px] field text-slate-400 px-1 py-0.5 rounded">ברירת מחדל</span>
                                 )}
                               </div>
                               <p className="text-[11px] text-slate-400">
@@ -3666,7 +3716,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
             </div>
 
             {/* Pilots table */}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-blue-400">👨‍✈️</span> רשימת טייסים ({db.pilots.length})
@@ -3800,7 +3850,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 </button>
               </div>
             )}
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="p-5 border-b border-slate-700/50">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-amber-400">🔋</span> ניהול סוללות ({droneBatteries.length})
@@ -3870,7 +3920,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
               </div>
             )}
 
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="p-5 border-b border-slate-700/50 flex items-center justify-between gap-4">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
                   <span className="text-blue-400">🚁</span> ניהול רחפנים ({droneDetails.length || DRONES.length})
@@ -4066,7 +4116,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
         {/* LOGIN LOGS */}
         {activeTab === 'logs' && (
           <div className="space-y-5">
-            <div className="bg-slate-800/70 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="glass overflow-hidden">
               <div className="p-5 border-b border-slate-700/50 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3">
                   <h2 className="text-base font-semibold text-white flex items-center gap-2">
