@@ -747,6 +747,38 @@ export default function PilotDashboard() {
     fetchDB()
   }
 
+  // Retro-add a flight to an existing mission from the history view.
+  // Reuses the exact add-flight form by prefilling `selectedMission` and
+  // jumping to step 2 of the "add" tab. No new API call, no logic changes —
+  // just a shortcut into the same flow the user already knows.
+  const addFlightToExistingMission = (group: MissionGroup) => {
+    const first = group.flights[0]
+    if (!first) return
+    // Prefer the full Mission record if we have the missionId; otherwise
+    // fabricate a lightweight one from the flight's own fields (covers legacy
+    // flights that were never linked to the missions table).
+    const fromTable = first.missionId ? allMissions.find(m => m.id === first.missionId) : null
+    const mission: Mission = fromTable ?? {
+      id:            first.missionId ?? '',
+      date:          group.date,
+      name:          group.missionName,
+      battalion:     first.battalion ?? [],
+      observer:      first.observer ?? [],
+      missionNumber: group.missionNum,
+      createdAt:     '',
+      isTraining:    isTrainingName(group.missionName),
+    }
+    setSelectedMission(mission)
+    setAddStep('flight')
+    setFormError('')
+    setFormSuccess('')
+    // Reset flight form so we don't inherit leftover data from an abandoned entry
+    setFlightForm({ ...emptyFlightForm, segments: [{ startTime: '', endTime: '' }] })
+    setActiveTab('add')
+    // Scroll to top so the operator lands on the form
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
+  }
+
   const handleEditSave = async (updated: {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
@@ -1381,12 +1413,12 @@ export default function PilotDashboard() {
                 return (
                 <div key={group.key} className={`bg-slate-800/70 border border-slate-700/50 border-l-4 ${isTrainingGroup ? 'border-l-purple-500' : monthBorder} rounded-xl overflow-hidden`}>
                   {/* Mission header */}
-                  <div className={`${isTrainingGroup ? 'bg-purple-900/30 border-purple-700/30' : 'bg-indigo-900/30 border-indigo-700/30'} border-b px-5 py-3 flex items-center gap-3`}>
+                  <div className={`${isTrainingGroup ? 'bg-purple-900/30 border-purple-700/30' : 'bg-indigo-900/30 border-indigo-700/30'} border-b px-5 py-3 flex items-center gap-3 flex-wrap`}>
                     <span className={`text-xs px-1.5 py-0.5 rounded border font-medium shrink-0 ${monthBadge}`}>{monthName}</span>
                     {isTrainingGroup && (
                       <span className="text-xs bg-purple-900/50 text-purple-300 border border-purple-700/50 px-1.5 py-0.5 rounded font-medium shrink-0">🎓 אימון</span>
                     )}
-                    <span className="text-white text-sm font-semibold truncate flex-1">
+                    <span className="text-white text-sm font-semibold truncate flex-1 min-w-0">
                       {isTrainingGroup ? '🎓' : '📋'} {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                     </span>
                     <span className="text-xs text-slate-400 shrink-0">
@@ -1395,6 +1427,23 @@ export default function PilotDashboard() {
                     {group.totalMinutes > 0 && (
                       <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
                     )}
+                    {/* Retro-add flight to this mission */}
+                    <button
+                      type="button"
+                      onClick={() => addFlightToExistingMission(group)}
+                      title="הוסף טיסה נוספת למשימה זו"
+                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all"
+                      style={{
+                        background: 'rgba(46,229,157,0.10)',
+                        borderColor: 'rgba(46,229,157,0.35)',
+                        color: 'rgb(var(--emerald))',
+                      }}
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+                      </svg>
+                      הוסף טיסה
+                    </button>
                   </div>
                   {/* Flights */}
                   <div className="divide-y divide-slate-700/30">

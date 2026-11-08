@@ -1658,6 +1658,33 @@ export default function AdminDashboard() {
     fetchDB()
   }
 
+  // Retro-add a flight to an existing mission from the history tab. Prefills
+  // the admin add-flight form (date, mission name, observers, battalion,
+  // training flag) so the admin only has to pick the pilot/drone/times.
+  // Two flights with the same date+missionName naturally group together so
+  // the new row lands under the same mission card.
+  const addFlightToExistingMissionAdmin = (group: { date: string; missionName: string; flights: Flight[] }) => {
+    const first = group.flights[0]
+    const fromTable = first?.missionId ? allMissions.find(m => m.id === first.missionId) : null
+    const observers  = fromTable?.observer ?? first?.observer ?? []
+    const battalions = fromTable?.battalion ?? first?.battalion ?? []
+    const isTraining = fromTable?.isTraining ?? isTrainingName(group.missionName)
+    setAddForm({
+      ...emptyAdminAddForm,
+      pilotId: '',
+      date: group.date,
+      missionName: group.missionName,
+      tailNumber: first?.tailNumber || '4x-pzk',
+      observers: observers.length > 0 ? observers : [''],
+      battalions: battalions.length > 0 ? battalions : [''],
+      isTraining,
+    })
+    setAddError('')
+    setAddSuccess('')
+    setActiveTab('add')
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
+  }
+
   const handleEdit = async (form: EditForm) => {
     if (!editFlight) return
     const pilot = db.pilots.find(p => p.id === form.pilotId)!
@@ -3424,7 +3451,7 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                 {/* Mission header */}
                 <div className="bg-indigo-900/30 border-b border-indigo-700/30 px-5 py-3 flex items-center gap-3 flex-wrap">
                   <span className={`text-xs px-1.5 py-0.5 rounded border font-medium shrink-0 ${monthBadge}`}>{monthName}</span>
-                  <span className="text-white text-sm font-semibold truncate flex-1">
+                  <span className="text-white text-sm font-semibold truncate flex-1 min-w-0">
                     📋 {group.missionName || <span className="text-slate-500 italic">ללא שם</span>}
                   </span>
                   <span className="text-xs text-slate-400 shrink-0">{new Date(group.date).toLocaleDateString('he-IL')}</span>
@@ -3433,6 +3460,25 @@ ALTER TABLE flights ADD COLUMN IF NOT EXISTS gas_drop_time TEXT DEFAULT NULL;`}
                   )}
                   {group.totalMinutes > 0 && (
                     <span className="text-xs text-indigo-300 font-medium shrink-0">{fmtHours(group.totalMinutes)}</span>
+                  )}
+                  {/* Retro-add flight — opens the "add flight" tab with the mission prefilled */}
+                  {canManageData && !isMerging && (
+                    <button
+                      type="button"
+                      onClick={() => addFlightToExistingMissionAdmin(group)}
+                      title="הוסף טיסה נוספת למשימה זו"
+                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all"
+                      style={{
+                        background: 'rgba(46,229,157,0.10)',
+                        borderColor: 'rgba(46,229,157,0.35)',
+                        color: 'rgb(var(--emerald))',
+                      }}
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+                      </svg>
+                      הוסף טיסה
+                    </button>
                   )}
                   {/* Merge button — admin only, only when there are other missions on same day */}
                   {canEdit && sameDayGroups.length > 0 && !isMerging && (
