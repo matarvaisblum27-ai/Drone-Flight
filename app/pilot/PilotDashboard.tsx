@@ -167,6 +167,7 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
     batteryCount: number; note: string
+    extraSegments: { startTime: string; endTime: string }[]
   }) => Promise<void>
   onCancel: () => void
 }) {
@@ -180,6 +181,10 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
     policeLogbookEntered: flight.policeLogbookEntered ?? false,
     batteryCount: flight.batteryCount ?? 1,
     note: flight.note ?? '',
+    /** Additional (startTime,endTime) pairs that will each become a brand new
+     *  Flight row at save time — same mission/pilot/drone/observer, just
+     *  different times. Empty by default. */
+    extraSegments: [] as { startTime: string; endTime: string }[],
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -187,7 +192,14 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
   const inputCls = 'w-full field rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all'
   const labelCls = 'block text-xs font-medium text-slate-400 mb-1.5'
 
-  const durationPreview = form.startTime && form.endTime ? calcDuration(form.startTime, form.endTime) : null
+  // Preview = original edited pair + every filled extra pair.
+  const durationPreview = (() => {
+    const main = form.startTime && form.endTime ? Math.max(0, calcDuration(form.startTime, form.endTime)) : 0
+    const extras = form.extraSegments.reduce((a, s) =>
+      a + (s.startTime && s.endTime ? Math.max(0, calcDuration(s.startTime, s.endTime)) : 0), 0)
+    const total = main + extras
+    return total > 0 ? total : null
+  })()
   const availableBatteries = batteries.filter(b => b.droneTailNumber === form.tailNumber)
   const noBatteries = availableBatteries.length === 0
 
@@ -196,6 +208,12 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
     if (form.startTime && form.endTime) {
       const dur = calcDuration(form.startTime, form.endTime)
       if (dur <= 0) { setError('שעת סיום חייבת להיות לאחר שעת התחלה'); return }
+    }
+    for (const s of form.extraSegments) {
+      if (s.startTime && s.endTime) {
+        const dur = calcDuration(s.startTime, s.endTime)
+        if (dur <= 0) { setError('שעת סיום חייבת להיות לאחר שעת התחלה בכל זוג'); return }
+      }
     }
     setSaving(true)
     try {
@@ -275,6 +293,68 @@ function PilotFlightEditModal({ flight, batteries, drones, onSave, onCancel }: {
               onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
               className={inputCls} />
           </div>
+
+          {/* ─── Extra flight segments ──────────────────────────────────────
+              Each pair here becomes a BRAND NEW flight record on save, sharing
+              everything else (mission, pilot, drone, battery, observer, note,
+              etc.) with the flight being edited. Lets the operator retro-add
+              more takeoff/landing pairs without leaving the edit modal. */}
+          {form.extraSegments.length > 0 && (
+            <div className="sm:col-span-2 space-y-2">
+              <p className="text-[11px] font-semibold" style={{ color: 'rgb(var(--emerald))' }}>
+                הטסות נוספות שיווצרו ({form.extraSegments.length})
+              </p>
+              {form.extraSegments.map((seg, idx) => {
+                const dur = seg.startTime && seg.endTime ? calcDuration(seg.startTime, seg.endTime) : 0
+                return (
+                  <div key={idx} className="glass-flat p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-medium text-slate-300">
+                        הטסה נוספת {idx + 1}
+                        {dur > 0 && <span className="mr-2" style={{ color: 'rgb(var(--emerald))' }}>· {fmtHours(dur)}</span>}
+                      </span>
+                      <button type="button"
+                        onClick={() => setForm(f => ({ ...f, extraSegments: f.extraSegments.filter((_, i) => i !== idx) }))}
+                        className="text-[11px] text-red-400 hover:text-red-300 bg-red-900/20 border border-red-700/30 px-2 py-0.5 rounded">
+                        − הסר
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת המראה</label>
+                        <input type="time" value={seg.startTime}
+                          onChange={e => setForm(f => ({ ...f, extraSegments: f.extraSegments.map((x, i) => i === idx ? { ...x, startTime: e.target.value } : x) }))}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">שעת נחיתה</label>
+                        <input type="time" value={seg.endTime}
+                          onChange={e => setForm(f => ({ ...f, extraSegments: f.extraSegments.map((x, i) => i === idx ? { ...x, endTime: e.target.value } : x) }))}
+                          className={inputCls} />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <button type="button"
+              onClick={() => setForm(f => ({ ...f, extraSegments: [...f.extraSegments, { startTime: '', endTime: '' }] }))}
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+              style={{
+                background: 'rgba(46,229,157,0.08)',
+                borderColor: 'rgba(46,229,157,0.35)',
+                color: 'rgb(var(--emerald))',
+              }}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+              </svg>
+              הוסף שעות המראה/נחיתה נוספות (אותם פרטים)
+            </button>
+          </div>
+
           {isGasDrone && (
             <div className="sm:col-span-2 bg-amber-900/20 border border-amber-700/40 rounded-xl p-4">
               <p className="text-xs font-semibold text-amber-400 mb-3">הטלת גז</p>
@@ -783,8 +863,10 @@ export default function PilotDashboard() {
     tailNumber: string; battery: string; startTime: string; endTime: string
     gasDropped: boolean; eventNumber: string; policeLogbookEntered: boolean
     batteryCount: number; note: string
+    extraSegments: { startTime: string; endTime: string }[]
   }) => {
     if (!editFlight) return
+    // 1) Update the flight being edited
     const duration = updated.startTime && updated.endTime ? calcDuration(updated.startTime, updated.endTime) : 0
     const res = await fetch('/api/flights', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -799,6 +881,38 @@ export default function PilotDashboard() {
       }),
     })
     if (!res.ok) throw new Error('save failed')
+
+    // 2) Create a NEW flight for each extra (startTime, endTime) pair.
+    //    Inherits EVERY other field from the flight being edited — same
+    //    pilot, mission, drone, battery, observer, battalion, note, etc.
+    //    so the new rows group under the same mission card.
+    const validExtras = updated.extraSegments.filter(s => s.startTime || s.endTime)
+    for (const seg of validExtras) {
+      const dur = seg.startTime && seg.endTime ? calcDuration(seg.startTime, seg.endTime) : 0
+      await fetch('/api/flights', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pilotId:     editFlight.pilotId,
+          pilotName:   editFlight.pilotName,
+          date:        editFlight.date,
+          missionName: editFlight.missionName,
+          missionId:   editFlight.missionId,
+          tailNumber:  updated.tailNumber,
+          battery:     updated.battery,
+          startTime:   seg.startTime,
+          endTime:     seg.endTime,
+          duration:    dur,
+          observer:    editFlight.observer,
+          gasDropped:  updated.gasDropped,
+          eventNumber: updated.eventNumber,
+          battalion:   editFlight.battalion,
+          policeLogbookEntered: updated.policeLogbookEntered,
+          batteryCount: updated.batteryCount,
+          note:        updated.note,
+        }),
+      })
+    }
+
     setEditFlight(null)
     fetchDB()
   }
